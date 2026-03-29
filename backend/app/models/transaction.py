@@ -39,3 +39,5 @@ class Transaction(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     user: Mapped["User"] = relationship(back_populates="transactions")
+    plan: Mapped["Plan | None"] = relationship()
+    promo_code: Mapped["PromoCode | None"] = relationship()
