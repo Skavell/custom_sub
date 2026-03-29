@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.setting import Setting
-from app.services.setting_service import get_setting_decrypted, set_setting
+from app.services.setting_service import get_setting, get_setting_decrypted, set_setting
 
 ENCRYPTION_KEY = "test-key-for-encryption-32-chars!"
 
@@ -75,3 +75,33 @@ async def test_set_setting_sensitive_encrypts(monkeypatch):
     assert added.is_sensitive is True
     assert "encrypted" in added.value
     assert added.value["encrypted"] != "secret"
+
+
+@pytest.mark.asyncio
+async def test_get_setting_returns_raw_value():
+    """get_setting returns plain value for non-sensitive setting."""
+    setting = MagicMock(spec=Setting)
+    setting.is_sensitive = False
+    setting.value = {"value": "raw_url_value"}
+
+    db = _make_db_with_setting(setting)
+    result = await get_setting(db, "remnawave_url")
+    assert result == "raw_url_value"
+
+
+@pytest.mark.asyncio
+async def test_set_setting_updates_existing():
+    """set_setting updates an existing record instead of inserting a new one."""
+    existing = MagicMock(spec=Setting)
+    existing.value = {"value": "old_value"}
+    existing.is_sensitive = False
+
+    db = AsyncMock(spec=AsyncSession)
+    db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=existing))
+    await set_setting(db, "remnawave_url", "new_value", is_sensitive=False)
+
+    # Should update existing record, not call db.add
+    db.add.assert_not_called()
+    assert existing.value == {"value": "new_value"}
+    assert existing.is_sensitive is False
+    db.commit.assert_awaited_once()

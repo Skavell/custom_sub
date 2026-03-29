@@ -23,6 +23,7 @@ async def get_setting_decrypted(db: AsyncSession, key: str) -> str | None:
         encrypted_blob = setting.value.get("encrypted")
         if not encrypted_blob:
             return None
+        # Deferred to avoid circular import
         from app.services.encryption_service import decrypt_value
         return decrypt_value(app_settings.settings_encryption_key, encrypted_blob)
     return setting.value.get("value")
@@ -36,6 +37,7 @@ async def set_setting(
     setting = result.scalar_one_or_none()
 
     if is_sensitive:
+        # Deferred to avoid circular import
         from app.services.encryption_service import encrypt_value
         encoded = encrypt_value(app_settings.settings_encryption_key, value)
         jsonb_value = {"encrypted": encoded}
