@@ -6,6 +6,7 @@ from app.config import settings
 from app.routers import auth
 from app.routers import users
 from app.routers import plans
+from app.routers import subscriptions
 
 
 @asynccontextmanager
@@ -34,6 +35,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(plans.router)
+app.include_router(subscriptions.router)
 
 
 @app.get("/api/health")
