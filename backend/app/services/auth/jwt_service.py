@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime, timedelta, timezone
-from jose import JWTError, jwt
+from jose import ExpiredSignatureError, JWTError, jwt
 from app.config import settings
 
 
@@ -34,12 +34,15 @@ def create_refresh_token(user_id: str, expires_delta: timedelta | None = None) -
 def verify_token(token: str, expected_type: TokenType) -> dict:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+    except ExpiredSignatureError:
+        raise ValueError("Token expired")
     except JWTError as e:
-        if "expired" in str(e).lower():
-            raise ValueError("Token expired")
         raise ValueError(f"Invalid token: {e}")
 
     if payload.get("type") != expected_type:
         raise ValueError(f"Invalid token type: expected {expected_type}")
+
+    if not payload.get("sub"):
+        raise ValueError("Token missing subject claim")
 
     return payload
