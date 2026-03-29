@@ -20,23 +20,79 @@ Plan 2 delivered: trial activation, subscription status API, Remnawave sync on f
 
 | File | Responsibility |
 |---|---|
-| `app/services/cryptomus_client.py` | httpx wrapper for Cryptomus REST API (create invoice, verify HMAC) |
-| `app/services/telegram_alert.py` | Send admin alert messages via Telegram Bot API |
+| `app/services/cryptomus_client.py` | httpx wrapper for Cryptomus REST API (create invoice, HMAC signing) |
+| `app/services/telegram_alert.py` | Send admin alert messages via Telegram Bot API (fire-and-forget) |
 | `app/services/payment_service.py` | Business logic: price calculation, pending-invoice deduplication, transaction lifecycle |
 | `app/routers/payments.py` | Three endpoints: create payment, webhook, history |
-
-### New DB Settings (stored AES-encrypted via `settings` table)
-
-| Key | Type | Description |
-|---|---|---|
-| `cryptomus_merchant_id` | sensitive | Cryptomus merchant UUID |
-| `cryptomus_api_key` | sensitive | Cryptomus secret key for HMAC signing |
-| `cryptomus_webhook_allowed_ips` | plain | JSON array of Cryptomus IP addresses, e.g. `["91.227.144.54", "91.227.144.55"]`. Empty array = skip IP check (for initial setup) |
-| `telegram_admin_chat_id` | plain | Telegram chat/user ID to receive admin alerts |
+| `app/schemas/payment.py` | Pydantic schemas for request/response |
 
 ### New Config Field
 
-`settings.site_url` — base URL for constructing the webhook callback URL (e.g. `https://my.example.com`). Added to `app/config.py` `Settings` class.
+`site_url: str` added to `app/config.py` `Settings` class (read from env var `SITE_URL`, default `"http://localhost"`). Stored in env/config rather than the DB settings table because it is a deployment-time constant, not an admin-UI parameter.
+
+### New DB Migration
+
+Add `payment_url: str | None` column to the `transactions` table (nullable VARCHAR 2048). Required to return existing pending invoice URLs during deduplication (guard 5) without an extra Cryptomus API round-trip.
+
+```sql
+ALTER TABLE transactions ADD COLUMN payment_url VARCHAR(2048);
+```
+
+### New DB Settings (via `settings` table)
+
+| Key | Sensitive | Fetched with |
+|---|---|---|
+| `cryptomus_merchant_id` | yes | `get_setting_decrypted` |
+| `cryptomus_api_key` | yes | `get_setting_decrypted` |
+| `cryptomus_webhook_allowed_ips` | no | `get_setting` |
+| `telegram_admin_chat_id` | no | `get_setting` |
+
+`telegram_bot_token` already exists from Plan 1 (fetched with `get_setting`).
+
+---
+
+## Pydantic Schemas (`app/schemas/payment.py`)
+
+```python
+import uuid
+from datetime import datetime
+from pydantic import BaseModel
+
+
+class CreatePaymentRequest(BaseModel):
+    plan_id: uuid.UUID
+    promo_code: str | None = None  # Only discount_percent codes; bonus_days handled in Plan 4
+
+
+class PaymentResponse(BaseModel):
+    payment_url: str
+    transaction_id: str
+    amount_rub: int
+    is_existing: bool  # True if returning an existing pending invoice
+
+
+class TransactionHistoryItem(BaseModel):
+    id: uuid.UUID
+    type: str          # actual TransactionType value: "payment", "trial_activation", etc.
+    status: str
+    amount_rub: int | None
+    plan_name: str | None  # plan.label if plan_id IS NOT NULL, else None
+    days_added: int | None
+    created_at: datetime
+    completed_at: datetime | None
+    model_config = {"from_attributes": True}
+
+
+class CryptomусWebhookPayload(BaseModel):
+    """Subset of Cryptomus webhook fields. Extra fields are ignored."""
+    order_id: str   # our transaction.id (UUID string)
+    uuid: str       # Cryptomus invoice UUID = transaction.external_payment_id
+    status: str     # "paid"|"paid_over"|"cancel"|"wrong_amount"|"fail"|"check"|"wrong_amount_waiting"
+    sign: str       # HMAC-MD5 signature — removed from body before verification
+    amount: str
+    currency: str
+    model_config = {"extra": "allow"}
+```
 
 ---
 
@@ -45,135 +101,206 @@ Plan 2 delivered: trial activation, subscription status API, Remnawave sync on f
 ### `POST /api/payments`
 
 **Auth:** Required (`get_current_user`)
-**Rate limit:** 5 requests/minute per IP (Redis, same `check_rate_limit` helper)
-
-**Request body:**
-```json
-{"plan_id": "uuid", "promo_code": "PROMO123"}
-```
-`promo_code` is optional; only `discount_percent` type codes are accepted here. `bonus_days` codes have their own endpoint (Plan 4).
+**Rate limit:** 5 requests/minute per IP — Redis key: `rate:payment:{client_ip}`, window 60 seconds
 
 **Guard order:**
 1. `user.remnawave_uuid is None` → 409 `"Сначала активируйте пробный период"`
 2. IP rate limit exceeded → 429
-3. Plan not found or `is_active = false` → 404
-4. Cryptomus not configured (merchant_id or api_key missing) → 503
-5. Existing `pending` transaction for this user < 30 min old → 200 with existing `payment_url` (no new invoice)
-6. Existing `pending` transaction ≥ 30 min old → mark `failed`, continue to create new
+3. `plan_id` not found or `plan.is_active = False` → 404
+4. `cryptomus_merchant_id` or `cryptomus_api_key` missing from settings → 503
+5. Load pending transaction using `SELECT ... FOR UPDATE` (blocking, not SKIP LOCKED) to serialise concurrent requests for the same user
+6. Existing `pending` transaction where `created_at > now - 30min` → return 200 with `transaction.payment_url` (`is_existing=True`). The blocking `FOR UPDATE` lock ensures only one concurrent request enters this branch.
+7. Existing `pending` transaction where `created_at <= now - 30min` → mark it `failed`, continue
 
-**Price calculation:**
-- Base: `plan.price_rub`
-- New user discount: if `not user.has_made_payment AND plan.name == "1_month" AND plan.new_user_price_rub IS NOT NULL` → candidate = `plan.new_user_price_rub`
-- Promo discount: if valid `discount_percent` code provided → candidate = `round(plan.price_rub * (1 - value/100))`
-- Final: `min(all candidates)` — lowest price wins
-- Amount stored in `transaction.amount_rub`
+**Price calculation** (`payment_service.calculate_final_price`):
+- Candidates list starts with `[plan.price_rub]`
+- New user discount: `not user.has_made_payment AND plan.name == "1_month" AND plan.new_user_price_rub IS NOT NULL` → add `plan.new_user_price_rub`. (Note: `"1_month"` matches the seed migration from Plan 2 — `f989da77bf10_seed_plans.py`.)
+- Promo discount (`discount_percent` type): if promo code provided and valid → add `round(plan.price_rub * (1 - value/100))`
+- Final: `min(candidates)` — lowest price wins
 
-**Cryptomus invoice creation:**
-- Currency: `RUB` (Cryptomus handles conversion internally)
-- `order_id = str(transaction.id)` — idempotency key
-- `url_callback = settings.site_url + "/api/payments/webhook"`
-- Transaction row created with `status=pending`, `external_payment_id=cryptomus_invoice_uuid`
+**Promo code validation:**
+- `promo_code.is_active = True`
+- `promo_code.valid_until IS NULL OR promo_code.valid_until > now`
+- `promo_code.max_uses IS NULL OR promo_code.used_count < promo_code.max_uses`
+- No `PromoCodeUsage` row for `(promo_code.id, user.id)`
+- `promo_code.type == PromoCodeType.discount_percent`
+- Invalid for any reason → 400 `"Промокод недействителен"`
+- `PromoCodeUsage` insert + `used_count` increment deferred to webhook completion (see below)
 
-**Response (200/201):**
+**Transaction creation (single atomic commit):**
+1. Create `Transaction(type=TransactionType.payment, status=pending, plan_id=plan.id, amount_rub=final_price, days_added=plan.duration_days, payment_provider="cryptomus", external_payment_id=None, payment_url=None, promo_code_id=promo.id if promo else None)`. Flush (do not commit yet).
+2. Call `CryptomусClient.create_invoice(amount=str(final_price) + ".00", currency="RUB", order_id=str(transaction.id), url_callback=settings.site_url + "/api/payments/webhook")`
+3. Set `transaction.external_payment_id = invoice.uuid` and `transaction.payment_url = invoice.url`.
+4. `await db.commit()` — single commit for the whole creation.
+
+If step 2 fails (httpx error or non-2xx from Cryptomus): set `transaction.status = failed`, commit, raise HTTP 503.
+
+**Response:** HTTP 201 for new invoice, HTTP 200 for existing pending invoice. Use `Response` object with explicit `status_code`.
+
 ```json
-{"payment_url": "https://pay.cryptomus.com/...", "transaction_id": "uuid", "amount_rub": 200}
+{"payment_url": "https://pay.cryptomus.com/...", "transaction_id": "uuid", "amount_rub": 200, "is_existing": false}
 ```
 
 ---
 
 ### `POST /api/payments/webhook`
 
-**Auth:** None (public endpoint, CSRF-exempt)
+**Auth:** None (public, CSRF-exempt)
+
+**HMAC verification (canonical raw-bytes approach):**
+
+Cryptomus computes: `sign = md5(base64(webhook_body_with_sign_replaced_by_empty_string) + api_key)`
+
+The only correct verification approach that avoids JSON re-serialisation key-order issues:
+
+```python
+import hashlib, base64, re, hmac as _hmac
+
+def verify_cryptomus_sign(raw_body: bytes, api_key: str) -> bool:
+    # Replace the sign value in the raw JSON bytes with an empty string
+    # Matches: "sign":"<any chars except quote>"  →  "sign":""
+    body_without_sign = re.sub(
+        rb'"sign"\s*:\s*"[^"]*"',
+        b'"sign":""',
+        raw_body,
+    )
+    encoded = base64.b64encode(body_without_sign).decode()
+    expected = hashlib.md5((encoded + api_key).encode()).hexdigest()
+    # Extract sign from parsed body for comparison
+    import json
+    sign = json.loads(raw_body).get("sign", "")
+    return _hmac.compare_digest(expected.lower(), sign.lower())
+```
+
+This is the canonical implementation. Do not use `json.loads` + `json.dumps` re-serialisation — it will break if Cryptomus sends formatted JSON or if key order differs.
+
 **Source verification (order matters):**
-1. IP allowlist check: `request.client.host` must be in `cryptomus_webhook_allowed_ips` setting. If the list is empty, skip this check. Failure → 400 (reason not disclosed)
-2. HMAC-MD5 verification: `md5(base64(raw_body) + api_key)` must match `sign` field in payload. Failure → 400
+1. IP allowlist: parse `cryptomus_webhook_allowed_ips` setting as JSON array. If missing/empty/`"[]"` → skip check. If `request.client.host` not in list → 400 (no detail, no logging to avoid log spam)
+2. HMAC: `verify_cryptomus_sign(raw_body, api_key)`. Failure → 400 (no detail)
 
 **Processing logic:**
-1. Find transaction by `order_id` from payload
-2. If transaction not found → 400
-3. If transaction already `completed` → 200 (idempotent)
-4. If Cryptomus status == `paid`:
-   a. `GET /users/{remnawave_uuid}` → current `expire_at`
-   b. `new_expire_at = expire_at + timedelta(days=plan.duration_days)`
-   c. `PATCH /users/{remnawave_uuid}` with `expireAt=new_expire_at`, `trafficLimitBytes=0` (unlimited — paid tier)
-   d. `sync_subscription_from_remnawave(db, user, remnawave_user)` — update local subscription row
-   e. `user.has_made_payment = True`
-   f. `transaction.status = completed`, `transaction.completed_at = now`
-   g. `await db.commit()`
-   h. Return 200
-5. If Remnawave call fails at step (a) or (c): transaction stays `pending`, send Telegram alert, return 500 (triggers Cryptomus retry)
-6. If Cryptomus status == `failed` or `expired`: `transaction.status = failed`, return 200
+1. Find `Transaction` by `order_id`. Not found → 400
+2. If `transaction.status == completed` → return 200 (idempotent)
+3. If status == `"check"` → return 200 (Cryptomus health-check ping, no action)
+4. If status in `{"paid", "paid_over"}`: call `complete_payment(db, transaction, user, plan, rw_client)` (see service below). On success return 200. On `RemnawaveError` → send Telegram alert, return 500.
+5. If status in `{"cancel", "wrong_amount", "fail", "wrong_amount_waiting"}` → `transaction.status = failed`, `await db.commit()`, return 200.
 
-**Telegram alert format on Remnawave failure:**
+**Telegram alert on Remnawave failure:**
+```python
+token = await get_setting(db, "telegram_bot_token")
+chat_id = await get_setting(db, "telegram_admin_chat_id")
+await send_admin_alert(token, chat_id,
+    f"⚠️ Webhook error: Remnawave unavailable\n"
+    f"Transaction: {transaction.id}\nUser: {user.id}\n"
+    f"Plan: {plan.label}\nError: {exc}"
+)
 ```
-⚠️ Webhook error: Remnawave unavailable
-Transaction: {transaction_id}
-User: {user_id}
-Plan: {plan_name}
-Error: {exc}
-```
-Bot token: `settings["telegram_bot_token"]` (already stored from Plan 1).
-Admin chat ID: `settings["telegram_admin_chat_id"]`.
 
 ---
 
 ### `GET /api/payments/history`
 
 **Auth:** Required
-**Response:** Last 20 transactions for the current user, ordered by `created_at DESC`.
-
-```json
-[
-  {
-    "id": "uuid",
-    "type": "payment",
-    "status": "completed",
-    "amount_rub": 200,
-    "plan_name": "1 месяц",
-    "days_added": 30,
-    "created_at": "2026-03-30T12:00:00Z",
-    "completed_at": "2026-03-30T12:05:00Z"
-  }
-]
-```
+**Query:** `SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`
+Returns all transaction types (payment, trial_activation, etc.) with their actual `type` value.
+`plan_name` = `transaction.plan.label` if `plan_id IS NOT NULL`, else `None`.
 
 ---
 
 ## Services
 
-### `CryptomусClient`
-
-Stateless httpx wrapper. Instantiated per-request from DB settings (same pattern as `RemnawaveClient`).
+### `CryptomусClient` (`services/cryptomus_client.py`)
 
 ```python
-class CryptomусClient:
-    def __init__(self, merchant_id: str, api_key: str) -> None: ...
-    async def create_invoice(self, amount: int, currency: str, order_id: str, url_callback: str) -> CryptomусInvoice: ...
-
 @dataclass
 class CryptomусInvoice:
-    uuid: str        # Cryptomus invoice ID → stored as external_payment_id
-    url: str         # Redirect URL for user
+    uuid: str    # Cryptomus invoice UUID → transaction.external_payment_id
+    url: str     # Redirect URL for user → transaction.payment_url
     order_id: str
     status: str
+
+class CryptomусClient:
+    BASE_URL = "https://api.cryptomus.com/v1"
+
+    def __init__(self, merchant_id: str, api_key: str) -> None:
+        self._merchant_id = merchant_id
+        self._api_key = api_key
+
+    def _sign(self, body: dict) -> str:
+        """md5(base64(compact_json_body) + api_key) for outgoing request signing."""
+        encoded = base64.b64encode(json.dumps(body, separators=(",", ":")).encode()).decode()
+        return hashlib.md5((encoded + self._api_key).encode()).hexdigest()
+
+    async def create_invoice(
+        self, amount: str, currency: str, order_id: str, url_callback: str
+    ) -> CryptomусInvoice:
+        """
+        amount: decimal string, e.g. "200.00" (required by Cryptomus API).
+        Request headers: merchant={merchant_id}, sign={_sign(body)}, Content-Type=application/json.
+        Response JSON contains: result.uuid, result.url, result.order_id, result.status.
+        """
 ```
 
-HMAC signature for requests: `md5(base64(json_body) + api_key)`, sent as `sign` header.
-
-### `TelegramAlertService`
-
-Simple fire-and-forget: `POST https://api.telegram.org/bot{token}/sendMessage`. Failures are logged and swallowed — never block the main flow.
+### `TelegramAlertService` (`services/telegram_alert.py`)
 
 ```python
-async def send_admin_alert(token: str, chat_id: str, message: str) -> None: ...
+async def send_admin_alert(token: str | None, chat_id: str | None, message: str) -> None:
+    """Fire-and-forget. No-ops if token or chat_id is None/empty. Swallows all failures."""
+    if not token or not chat_id:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            await http.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": message},
+            )
+    except Exception as exc:
+        logger.warning("Telegram alert failed (non-blocking): %s", exc)
 ```
 
 ### `payment_service.py`
 
-Contains pure business logic functions called by the router:
-- `calculate_final_price(plan, user, promo_code_row | None) -> int`
-- `get_or_create_pending_transaction(db, user, plan) -> tuple[Transaction, bool]` — returns (tx, is_new)
-- `complete_payment(db, transaction, remnawave_client) -> None` — extends Remnawave + updates local state
+```python
+async def calculate_final_price(
+    db: AsyncSession, plan: Plan, user: User, promo_code_str: str | None
+) -> tuple[int, PromoCode | None]:
+    """Returns (final_price_rub, validated_promo_or_None). Raises HTTP 400 for invalid promo."""
+
+async def get_pending_transaction(
+    db: AsyncSession, user_id: uuid.UUID
+) -> Transaction | None:
+    """SELECT ... FOR UPDATE (blocking). Returns most recent pending tx or None."""
+
+async def complete_payment(
+    db: AsyncSession,
+    transaction: Transaction,
+    user: User,
+    plan: Plan,
+    rw_client: RemnawaveClient,
+) -> None:
+    """
+    Atomically:
+    1. GET remnawave user for current expire_at
+    2. new_expire_at = max(expire_at, now) + timedelta(days=plan.duration_days)
+    3. PATCH remnawave user: trafficLimitBytes=0, expireAt=new_expire_at
+    4. Update local subscription fields directly (type, status, expires_at, traffic_limit_gb,
+       synced_at) WITHOUT calling sync_subscription_from_remnawave — that function has an
+       internal commit which would break atomicity. Instead, upsert the Subscription row
+       manually, then call db.flush() (not commit).
+    5. user.has_made_payment = True
+    6. transaction.status = completed, transaction.completed_at = now
+    7. transaction.days_added = plan.duration_days (explicit set)
+    8. If transaction.promo_code_id IS NOT NULL:
+       - SELECT promo_code FOR UPDATE (blocking, prevents max_uses race)
+       - INSERT PromoCodeUsage(promo_code_id, user_id, used_at=now)
+       - promo_code.used_count += 1
+    9. await db.commit()  — single commit for entire payment completion
+    Raises: RemnawaveError (or httpx.HTTPStatusError) if Remnawave call fails.
+    Caller handles the exception: sends Telegram alert, returns 500.
+    """
+```
+
+**Key atomicity note:** `complete_payment` does NOT call `sync_subscription_from_remnawave` because that function internally commits (which would split the payment completion into two separate transactions, creating a crash-recovery window). Instead, it updates the `Subscription` row directly and commits everything in one `db.commit()`.
 
 ---
 
@@ -184,23 +311,24 @@ Contains pure business logic functions called by the router:
 | Invalid IP on webhook | 400 | No |
 | Invalid HMAC on webhook | 400 | No |
 | Transaction not found | 400 | No |
+| Status "check" | 200 | — |
 | Already completed | 200 | — |
-| Remnawave unavailable | 500 | Yes (Cryptomus retries on 5xx) |
-| Payment failed/expired | 200 | — |
+| Remnawave unavailable | 500 | Yes |
+| Payment failed/cancel/wrong_amount | 200 | — |
 
 ---
 
 ## Testing Strategy
 
-**~20 new tests across 5 test files:**
+**~22 new tests across 5 test files:**
 
 | File | Tests |
 |---|---|
-| `tests/services/test_cryptomus_client.py` | create_invoice success, HMAC sign correct, HTTP error bubbles up |
-| `tests/services/test_telegram_alert.py` | message sent, failure swallowed |
-| `tests/services/test_payment_service.py` | price calc (new user discount, promo, min logic), pending deduplication |
-| `tests/routers/test_payments_create.py` | no remnawave_uuid→409, rate limited→429, plan not found→404, not configured→503, duplicate pending→200 with existing URL, success→201 |
-| `tests/routers/test_payments_webhook.py` | invalid IP→400, invalid HMAC→400, already completed→200, paid success, remnawave failure→500+alert, payment failed→200 |
+| `tests/services/test_cryptomus_client.py` | create_invoice success (amount is str "200.00"), HMAC sign header correct, HTTP error bubbles up |
+| `tests/services/test_telegram_alert.py` | message sent, failure swallowed, no-op on missing token, no-op on missing chat_id |
+| `tests/services/test_payment_service.py` | price: no discount, new_user discount, promo discount, min-wins; pending dedup returns existing (FOR UPDATE); promo invalid → 400 |
+| `tests/routers/test_payments_create.py` | no remnawave_uuid→409, rate_limited→429, plan_not_found→404, not_configured→503, duplicate_pending→200 is_existing=True, success→201 with payment_url |
+| `tests/routers/test_payments_webhook.py` | invalid IP→400, invalid HMAC→400, status=check→200, already_completed→200, paid_success (all fields committed, single commit), remnawave_fail→500+alert+tx_still_pending, cancel→200 tx=failed |
 
 All 55 existing tests must remain green.
 
@@ -208,10 +336,10 @@ All 55 existing tests must remain green.
 
 ## Task Breakdown
 
-| # | Task | Files |
+| # | Task | Files changed |
 |---|---|---|
-| 1 | `CryptomусClient` | `services/cryptomus_client.py` + `tests/services/test_cryptomus_client.py` |
-| 2 | `TelegramAlertService` | `services/telegram_alert.py` + `tests/services/test_telegram_alert.py` |
-| 3 | `POST /api/payments` | `services/payment_service.py` + `routers/payments.py` (create only) + `tests/routers/test_payments_create.py` |
-| 4 | `POST /api/payments/webhook` | extend `routers/payments.py` + `tests/routers/test_payments_webhook.py` |
-| 5 | `GET /api/payments/history` + smoke test | extend `routers/payments.py` + Docker smoke + `git tag plan-3-complete` |
+| 1 | `CryptomусClient` + `payment_url` migration | `services/cryptomus_client.py`, `alembic/versions/*_add_payment_url_to_transactions.py`, `tests/services/test_cryptomus_client.py` |
+| 2 | `TelegramAlertService` | `services/telegram_alert.py`, `tests/services/test_telegram_alert.py` |
+| 3 | `POST /api/payments` | `schemas/payment.py`, `services/payment_service.py`, `routers/payments.py` (create only), `config.py` (site_url), register in `main.py`, `tests/routers/test_payments_create.py` |
+| 4 | `POST /api/payments/webhook` | extend `routers/payments.py` (webhook + complete_payment integration), extend `services/payment_service.py` (complete_payment), `tests/routers/test_payments_webhook.py` |
+| 5 | `GET /api/payments/history` + smoke test | extend `routers/payments.py`, extend `schemas/payment.py`, Docker smoke, `git tag plan-3-complete` |
