@@ -1,4 +1,5 @@
 import pytest
+from cryptography.exceptions import InvalidTag
 from app.services.encryption_service import encrypt_value, decrypt_value
 
 
@@ -14,7 +15,7 @@ def test_wrong_key_raises():
     key_a = "key-a-for-encryption-32-chars!!!"
     key_b = "key-b-for-encryption-32-chars!!!"
     ciphertext = encrypt_value(key_a, "secret")
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         decrypt_value(key_b, ciphertext)
 
 
@@ -35,3 +36,9 @@ def test_nonce_uniqueness():
     c1 = encrypt_value(key, "same")
     c2 = encrypt_value(key, "same")
     assert c1 != c2
+
+
+def test_malformed_base64_raises_value_error():
+    key = "test-key-for-encryption-32-chars!"
+    with pytest.raises(ValueError, match="Invalid base64"):
+        decrypt_value(key, "not-valid-base64!!!")
