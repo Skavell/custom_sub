@@ -1,3 +1,4 @@
+import logging
 import uuid as _uuid
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
 from redis.asyncio import Redis
@@ -19,6 +20,7 @@ from app.services.auth.oauth.vk import exchange_vk_code
 from app.services.setting_service import get_setting
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 COOKIE_OPTS = {
     "httponly": True,
@@ -137,7 +139,9 @@ async def oauth_telegram(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    bot_token = await get_setting(db, "telegram_bot_token") or ""
+    bot_token = await get_setting(db, "telegram_bot_token")
+    if not bot_token:
+        raise HTTPException(status_code=503, detail="Telegram OAuth not configured")
     try:
         raw = data.model_dump()
         verify_telegram_data(raw, bot_token=bot_token)
@@ -172,7 +176,8 @@ async def oauth_google(
 ):
     try:
         g_user = await exchange_google_code(data.code, data.redirect_uri)
-    except Exception:
+    except Exception as exc:
+        logger.exception("Google OAuth exchange failed: %s", exc)
         raise HTTPException(status_code=400, detail="Google OAuth failed")
 
     user = await get_user_by_provider(db, ProviderType.google, g_user.id)
@@ -198,7 +203,8 @@ async def oauth_vk(
 ):
     try:
         vk_user = await exchange_vk_code(data.code, data.redirect_uri, data.device_id, data.state)
-    except Exception:
+    except Exception as exc:
+        logger.exception("VK OAuth exchange failed: %s", exc)
         raise HTTPException(status_code=400, detail="VK OAuth failed")
 
     user = await get_user_by_provider(db, ProviderType.vk, vk_user.id)

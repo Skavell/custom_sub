@@ -33,7 +33,7 @@ def verify_telegram_data(data: dict, bot_token: str, max_age_seconds: int = 8640
 
 def parse_telegram_user(data: dict) -> TelegramUser:
     return TelegramUser(
-        id=int(data["id"]),
+        id=data["id"],
         first_name=data["first_name"],
         last_name=data.get("last_name"),
         username=data.get("username"),
