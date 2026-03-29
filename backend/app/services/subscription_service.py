@@ -103,4 +103,7 @@ async def sync_subscription_from_remnawave(
     sub.synced_at = now
 
     await db.commit()
+    # Refresh so attributes are not in "expired" state after commit (same rationale
+    # as create_trial_subscription — avoids MissingGreenlet on async attribute access).
+    await db.refresh(sub)
     return sub
