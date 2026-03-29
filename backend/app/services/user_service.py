@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.user import User
 from app.models.auth_provider import AuthProvider, ProviderType
-from app.services.auth.password_service import hash_password, verify_password
+from app.services.auth.password_service import hash_password
 
 
 async def get_user_by_provider(

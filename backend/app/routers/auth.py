@@ -23,9 +23,15 @@ COOKIE_OPTS = {
 }
 
 
-def _set_auth_cookies(response: Response, user_id: str) -> None:
+async def _set_auth_cookies(response: Response, user_id: str, redis: Redis) -> None:
+    """Issue access + refresh tokens, store refresh jti in Redis for rotation."""
     access = create_access_token(str(user_id))
-    refresh = create_refresh_token(str(user_id))
+    refresh, jti = create_refresh_token(str(user_id))
+    await redis.setex(
+        f"refresh_jti:{jti}",
+        settings.refresh_token_expire_days * 86400,
+        str(user_id),
+    )
     response.set_cookie("access_token", access, max_age=settings.access_token_expire_minutes * 60, **COOKIE_OPTS)
     response.set_cookie("refresh_token", refresh, max_age=settings.refresh_token_expire_days * 86400, **COOKIE_OPTS)
 
@@ -35,6 +41,7 @@ async def register_email(
     data: EmailRegisterRequest,
     response: Response,
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     existing, _ = await get_user_by_email(db, data.email)
     if existing:
@@ -47,7 +54,7 @@ async def register_email(
         provider_user_id=data.email.lower(),
         password=data.password,
     )
-    _set_auth_cookies(response, str(user.id))
+    await _set_auth_cookies(response, str(user.id), redis)
     return TokenResponse(user_id=str(user.id), display_name=user.display_name)
 
 
@@ -56,6 +63,7 @@ async def login_email(
     data: EmailLoginRequest,
     response: Response,
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     user, provider = await get_user_by_email(db, data.email)
     if not user or not provider or not provider.password_hash:
@@ -63,7 +71,7 @@ async def login_email(
     if not verify_password(data.password, provider.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    _set_auth_cookies(response, str(user.id))
+    await _set_auth_cookies(response, str(user.id), redis)
     return TokenResponse(user_id=str(user.id), display_name=user.display_name)
 
 
@@ -76,8 +84,8 @@ async def logout(
     access_token = request.cookies.get("access_token")
     if access_token:
         await redis.setex(f"blacklist:{access_token}", settings.access_token_expire_minutes * 60, "1")
-    response.delete_cookie("access_token")
-    response.delete_cookie("refresh_token")
+    response.delete_cookie("access_token", samesite="strict", httponly=True, secure=settings.is_production)
+    response.delete_cookie("refresh_token", samesite="strict", httponly=True, secure=settings.is_production)
     return {"ok": True}
 
 
@@ -97,14 +105,22 @@ async def refresh(
     except ValueError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    # Invalidate old refresh token (rotation)
-    await redis.delete(f"refresh:{token[:32]}")
+    jti = payload.get("jti")
+    if not jti or not await redis.exists(f"refresh_jti:{jti}"):
+        raise HTTPException(status_code=401, detail="Refresh token revoked or not found")
 
-    user_id = payload["sub"]
-    result = await db.execute(_select(User).where(User.id == _uuid.UUID(user_id)))
+    # Invalidate old jti before issuing new tokens (rotation)
+    await redis.delete(f"refresh_jti:{jti}")
+
+    try:
+        user_uuid = _uuid.UUID(payload["sub"])
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid token subject")
+
+    result = await db.execute(_select(User).where(User.id == user_uuid))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
-    _set_auth_cookies(response, str(user.id))
+    await _set_auth_cookies(response, str(user.id), redis)
     return TokenResponse(user_id=str(user.id), display_name=user.display_name)

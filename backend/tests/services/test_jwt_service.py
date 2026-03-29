@@ -17,9 +17,10 @@ def test_access_token_roundtrip():
 
 def test_refresh_token_roundtrip():
     user_id = "550e8400-e29b-41d4-a716-446655440000"
-    token = create_refresh_token(user_id)
+    token, jti = create_refresh_token(user_id)
     payload = verify_token(token, TokenType.REFRESH)
     assert payload["sub"] == user_id
+    assert payload["jti"] == jti
 
 
 def test_access_token_rejected_as_refresh():

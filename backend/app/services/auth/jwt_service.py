@@ -1,4 +1,5 @@
 import enum
+import uuid
 from datetime import datetime, timedelta, timezone
 from jose import ExpiredSignatureError, JWTError, jwt
 from app.config import settings
@@ -20,15 +21,18 @@ def create_access_token(user_id: str, expires_delta: timedelta | None = None) ->
     )
 
 
-def create_refresh_token(user_id: str, expires_delta: timedelta | None = None) -> str:
+def create_refresh_token(user_id: str, expires_delta: timedelta | None = None) -> tuple[str, str]:
+    """Returns (token, jti). The jti must be stored in Redis to enable rotation."""
+    jti = str(uuid.uuid4())
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(days=settings.refresh_token_expire_days)
     )
-    return jwt.encode(
-        {"sub": user_id, "type": TokenType.REFRESH, "exp": expire},
+    token = jwt.encode(
+        {"sub": user_id, "type": TokenType.REFRESH, "exp": expire, "jti": jti},
         settings.secret_key,
         algorithm="HS256",
     )
+    return token, jti
 
 
 def verify_token(token: str, expected_type: TokenType) -> dict:

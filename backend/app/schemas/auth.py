@@ -6,6 +6,15 @@ class EmailRegisterRequest(BaseModel):
     password: str
     display_name: str
 
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Display name cannot be empty")
+        if len(v) > 64:
+            raise ValueError("Display name must be 64 characters or less")
+        return v.strip()
+
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
