@@ -17,10 +17,38 @@ from app.config import settings
 from app.services.auth.oauth.telegram import verify_telegram_data, parse_telegram_user
 from app.services.auth.oauth.google import exchange_google_code
 from app.services.auth.oauth.vk import exchange_vk_code
-from app.services.setting_service import get_setting
+from app.services.setting_service import get_setting, get_setting_decrypted
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
+
+
+async def _sync_remnawave_on_first_telegram_login(
+    db: AsyncSession, user: "User", telegram_id: int
+) -> None:
+    """Best-effort: look up user in Remnawave by Telegram ID and sync subscription.
+    Failures are logged and swallowed — the auth flow must not be blocked by this.
+    """
+    import uuid as _uuid2
+    try:
+        remnawave_url = await get_setting(db, "remnawave_url")
+        remnawave_token = await get_setting_decrypted(db, "remnawave_token")
+        if not remnawave_url or not remnawave_token:
+            return  # Not configured — skip silently
+
+        from app.services.remnawave_client import RemnawaveClient
+        from app.services.subscription_service import sync_subscription_from_remnawave
+
+        rw_client = RemnawaveClient(remnawave_url, remnawave_token)
+        rw_user = await rw_client.get_user_by_telegram_id(telegram_id)
+        if rw_user is None:
+            return  # Not found in Remnawave — new user with no prior subscription
+
+        user.remnawave_uuid = _uuid2.UUID(rw_user.id)
+        await db.commit()
+        await sync_subscription_from_remnawave(db, user, rw_user)
+    except Exception as exc:
+        logger.warning("Remnawave sync on first Telegram login failed (non-blocking): %s", exc)
 
 COOKIE_OPTS = {
     "httponly": True,
@@ -143,7 +171,7 @@ async def oauth_telegram(
     if not bot_token:
         raise HTTPException(status_code=503, detail="Telegram OAuth not configured")
     try:
-        raw = data.model_dump()
+        raw = data.model_dump(exclude_none=True)
         verify_telegram_data(raw, bot_token=bot_token)
         tg_user = parse_telegram_user(raw)
     except ValueError as e:
@@ -162,6 +190,8 @@ async def oauth_telegram(
             avatar_url=tg_user.photo_url,
             provider_username=tg_user.username,
         )
+        # Fail-silent Remnawave sync: try to find prior subscription by Telegram ID
+        await _sync_remnawave_on_first_telegram_login(db, user, tg_user.id)
 
     await _set_auth_cookies(response, str(user.id), redis)
     return TokenResponse(user_id=str(user.id), display_name=user.display_name)
