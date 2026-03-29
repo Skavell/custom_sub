@@ -20,7 +20,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute(
+    conn = op.get_bind()
+    conn.execute(
         sa.text("""
         INSERT INTO plans (id, name, label, duration_days, price_rub, new_user_price_rub, is_active, sort_order)
         VALUES
