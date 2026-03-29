@@ -7,7 +7,9 @@ from app.config import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # TODO (Task 4-5): init DB engine and run startup checks here
     yield
+    # TODO (Task 4-5): dispose DB engine on shutdown
 
 
 app = FastAPI(
