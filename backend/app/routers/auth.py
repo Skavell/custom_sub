@@ -6,13 +6,17 @@ from sqlalchemy import select as _select
 
 from app.database import get_db
 from app.redis_client import get_redis
-from app.schemas.auth import EmailRegisterRequest, EmailLoginRequest, TokenResponse
+from app.schemas.auth import EmailRegisterRequest, EmailLoginRequest, TokenResponse, TelegramOAuthRequest, GoogleOAuthRequest, VKOAuthRequest
 from app.services.auth.jwt_service import create_access_token, create_refresh_token, verify_token, TokenType
 from app.services.auth.password_service import verify_password
-from app.services.user_service import create_user_with_provider, get_user_by_email
+from app.services.user_service import create_user_with_provider, get_user_by_email, get_user_by_provider
 from app.models.auth_provider import ProviderType
 from app.models.user import User
 from app.config import settings
+from app.services.auth.oauth.telegram import verify_telegram_data, parse_telegram_user
+from app.services.auth.oauth.google import exchange_google_code
+from app.services.auth.oauth.vk import exchange_vk_code
+from app.services.setting_service import get_setting
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -121,6 +125,91 @@ async def refresh(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+
+    await _set_auth_cookies(response, str(user.id), redis)
+    return TokenResponse(user_id=str(user.id), display_name=user.display_name)
+
+
+@router.post("/oauth/telegram", response_model=TokenResponse)
+async def oauth_telegram(
+    data: TelegramOAuthRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    bot_token = await get_setting(db, "telegram_bot_token") or ""
+    try:
+        raw = data.model_dump()
+        verify_telegram_data(raw, bot_token=bot_token)
+        tg_user = parse_telegram_user(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    user = await get_user_by_provider(db, ProviderType.telegram, str(tg_user.id))
+    if not user:
+        display_name = tg_user.first_name
+        if tg_user.last_name:
+            display_name += f" {tg_user.last_name}"
+        user = await create_user_with_provider(
+            db,
+            display_name=display_name,
+            provider=ProviderType.telegram,
+            provider_user_id=str(tg_user.id),
+            avatar_url=tg_user.photo_url,
+            provider_username=tg_user.username,
+        )
+
+    await _set_auth_cookies(response, str(user.id), redis)
+    return TokenResponse(user_id=str(user.id), display_name=user.display_name)
+
+
+@router.post("/oauth/google", response_model=TokenResponse)
+async def oauth_google(
+    data: GoogleOAuthRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    try:
+        g_user = await exchange_google_code(data.code, data.redirect_uri)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Google OAuth failed")
+
+    user = await get_user_by_provider(db, ProviderType.google, g_user.id)
+    if not user:
+        user = await create_user_with_provider(
+            db,
+            display_name=g_user.name,
+            provider=ProviderType.google,
+            provider_user_id=g_user.id,
+            avatar_url=g_user.picture,
+        )
+
+    await _set_auth_cookies(response, str(user.id), redis)
+    return TokenResponse(user_id=str(user.id), display_name=user.display_name)
+
+
+@router.post("/oauth/vk", response_model=TokenResponse)
+async def oauth_vk(
+    data: VKOAuthRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    try:
+        vk_user = await exchange_vk_code(data.code, data.redirect_uri, data.device_id, data.state)
+    except Exception:
+        raise HTTPException(status_code=400, detail="VK OAuth failed")
+
+    user = await get_user_by_provider(db, ProviderType.vk, vk_user.id)
+    if not user:
+        user = await create_user_with_provider(
+            db,
+            display_name=f"{vk_user.first_name} {vk_user.last_name}".strip(),
+            provider=ProviderType.vk,
+            provider_user_id=vk_user.id,
+            avatar_url=vk_user.avatar,
+        )
 
     await _set_auth_cookies(response, str(user.id), redis)
     return TokenResponse(user_id=str(user.id), display_name=user.display_name)
