@@ -9,6 +9,8 @@ from app.redis_client import get_redis
 from app.models.user import User
 from app.services.auth.jwt_service import TokenType, verify_token
 
+_401 = {"WWW-Authenticate": "Bearer"}
+
 
 async def get_current_user(
     request: Request,
@@ -17,22 +19,27 @@ async def get_current_user(
 ) -> User:
     token = request.cookies.get("access_token")
     if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated", headers=_401)
 
     try:
         payload = verify_token(token, TokenType.ACCESS)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token", headers=_401)
 
     # Check blacklist
     if await redis.exists(f"blacklist:{token}"):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked", headers=_401)
 
-    user_id = payload["sub"]
-    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    # payload["sub"] is guaranteed by verify_token, but UUID parse can still fail on malformed input
+    try:
+        user_uuid = uuid.UUID(payload["sub"])
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token subject", headers=_401)
+
+    result = await db.execute(select(User).where(User.id == user_uuid))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found", headers=_401)
 
     return user
 
