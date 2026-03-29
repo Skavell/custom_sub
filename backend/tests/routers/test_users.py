@@ -220,6 +220,17 @@ async def test_delete_nonexistent_provider():
 
 
 @pytest.mark.asyncio
+async def test_delete_provider_unauthenticated():
+    """Returns 401 when no auth cookie is present."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.delete("/api/users/me/providers/vk")
+
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_delete_invalid_provider_name():
     """Returns 422 for unknown provider type."""
     user_id = uuid.uuid4()

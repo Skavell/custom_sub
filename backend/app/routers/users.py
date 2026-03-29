@@ -44,7 +44,7 @@ async def delete_provider(
         provider_type = ProviderType(provider)
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Invalid provider: {provider}. Must be one of: {[p.value for p in ProviderType]}",
         )
 
@@ -61,7 +61,8 @@ async def delete_provider(
     )
     all_providers = result.scalars().all()
 
-    # Find the provider to delete
+    # Find the provider to delete — must exist before checking count,
+    # so that a missing provider always yields 404 (not "last provider" 400).
     target = next((p for p in all_providers if p.provider == provider_type), None)
     if target is None:
         raise HTTPException(
@@ -69,7 +70,8 @@ async def delete_provider(
             detail=f"Provider {provider} is not linked to this account",
         )
 
-    # Cannot remove last provider
+    # Guard after confirming target exists: email is blocked above, so reaching
+    # here with len==1 means the sole non-email provider would be removed.
     if len(all_providers) == 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
