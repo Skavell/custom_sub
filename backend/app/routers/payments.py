@@ -185,8 +185,11 @@ def _verify_webhook_sig(raw_body: bytes, headers: dict, token: str) -> bool:
 
 
 async def _load_transaction(db: AsyncSession, order_id: str) -> Transaction | None:
+    uid = _uuid_or_none(order_id)
+    if uid is None:
+        return None
     result = await db.execute(
-        select(Transaction).where(Transaction.id == _uuid_or_none(order_id))
+        select(Transaction).where(Transaction.id == uid)
     )
     return result.scalar_one_or_none()
 
@@ -199,7 +202,6 @@ def _uuid_or_none(s: str):
 
 
 async def _load_plan_and_user(db: AsyncSession, transaction: Transaction):
-    from app.models.user import User
     plan_res = await db.execute(select(Plan).where(Plan.id == transaction.plan_id))
     plan = plan_res.scalar_one_or_none()
     user_res = await db.execute(select(User).where(User.id == transaction.user_id))
