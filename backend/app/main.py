@@ -12,6 +12,7 @@ from app.routers import promo_codes
 from app.routers import install
 from app.routers import support
 from app.routers import articles
+from app.routers import admin
 
 
 @asynccontextmanager
@@ -46,6 +47,7 @@ app.include_router(promo_codes.router)
 app.include_router(install.router)
 app.include_router(support.router)
 app.include_router(articles.router)
+app.include_router(admin.router)
 
 
 @app.get("/api/health")
