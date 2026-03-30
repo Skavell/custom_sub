@@ -130,3 +130,130 @@ async def test_validate_discount_promo_returned_correctly():
     assert result_promo.type == PromoCodeType.discount_percent
     assert result_promo.value == 20
     assert already_used is False
+
+
+# --- apply_bonus_days ---
+
+def _make_rw_client(expire_at=None):
+    """Mock RemnawaveClient. get_user returns rw_user, update_user returns updated rw_user."""
+    if expire_at is None:
+        expire_at = NOW + timedelta(days=5)
+    rw_user = MagicMock()
+    rw_user.expire_at = expire_at
+    client = AsyncMock()
+    client.get_user = AsyncMock(return_value=rw_user)
+    # update_user returns a new rw_user with updated expire_at
+    async def _update(uuid_str, traffic_limit_bytes=None, expire_at=None):
+        updated = MagicMock()
+        from datetime import datetime
+        updated.expire_at = datetime.fromisoformat(expire_at.replace("Z", "+00:00"))
+        return updated
+    client.update_user = AsyncMock(side_effect=_update)
+    return client
+
+
+def _db_for_apply(promo, usage=None, sub=None):
+    """DB mock for apply_bonus_days: handles SELECT FOR UPDATE promo, usage check, subscription."""
+    db = AsyncMock(spec=AsyncSession)
+    call_count = [0]
+
+    def _side(stmt, *a, **kw):
+        call_count[0] += 1
+        result = MagicMock()
+        if call_count[0] == 1:
+            result.scalar_one_or_none = MagicMock(return_value=promo)   # FOR UPDATE promo
+        elif call_count[0] == 2:
+            result.scalar_one_or_none = MagicMock(return_value=usage)   # usage check
+        else:
+            result.scalar_one_or_none = MagicMock(return_value=sub)     # subscription upsert
+        return result
+
+    db.execute = AsyncMock(side_effect=_side)
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    return db
+
+
+@pytest.mark.asyncio
+async def test_apply_bonus_days_success_no_existing_sub():
+    from app.services.promo_code_service import apply_bonus_days
+    promo = _make_promo(value=30)
+    user = _make_user()
+    user.remnawave_uuid = uuid.uuid4()
+    rw_client = _make_rw_client(expire_at=NOW + timedelta(days=5))
+    db = _db_for_apply(promo, usage=None, sub=None)
+
+    days_added, new_expires_at = await apply_bonus_days(db, promo, user, rw_client)
+
+    assert days_added == 30
+    # new_expires_at should be ~35 days from now (5 existing + 30 bonus)
+    assert new_expires_at > NOW + timedelta(days=34)
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_apply_bonus_days_extends_existing_sub():
+    from app.services.promo_code_service import apply_bonus_days
+    from app.models.subscription import Subscription, SubscriptionType, SubscriptionStatus
+
+    promo = _make_promo(value=15)
+    user = _make_user()
+    user.remnawave_uuid = uuid.uuid4()
+    rw_client = _make_rw_client(expire_at=NOW + timedelta(days=20))
+
+    sub = MagicMock(spec=Subscription)
+    sub.type = SubscriptionType.trial
+    db = _db_for_apply(promo, usage=None, sub=sub)
+
+    days_added, new_expires_at = await apply_bonus_days(db, promo, user, rw_client)
+
+    assert days_added == 15
+    # Sub type should have been set to paid
+    assert sub.type == SubscriptionType.paid
+    assert sub.traffic_limit_gb is None
+
+
+@pytest.mark.asyncio
+async def test_apply_bonus_days_already_used_raises_400():
+    from app.services.promo_code_service import apply_bonus_days
+    promo = _make_promo(value=30)
+    user = _make_user()
+    user.remnawave_uuid = uuid.uuid4()
+    usage = MagicMock(spec=PromoCodeUsage)
+    rw_client = _make_rw_client()
+    db = _db_for_apply(promo, usage=usage)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await apply_bonus_days(db, promo, user, rw_client)
+    assert exc_info.value.status_code == 400
+    assert "использован" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_apply_bonus_days_maxed_at_lock_time_raises_400():
+    from app.services.promo_code_service import apply_bonus_days
+    promo = _make_promo(value=30, max_uses=5, used_count=5)
+    user = _make_user()
+    user.remnawave_uuid = uuid.uuid4()
+    rw_client = _make_rw_client()
+    db = _db_for_apply(promo, usage=None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await apply_bonus_days(db, promo, user, rw_client)
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_apply_bonus_days_increments_used_count():
+    from app.services.promo_code_service import apply_bonus_days
+    promo = _make_promo(value=30)
+    promo.used_count = 3
+    user = _make_user()
+    user.remnawave_uuid = uuid.uuid4()
+    rw_client = _make_rw_client()
+    db = _db_for_apply(promo, usage=None, sub=None)
+
+    await apply_bonus_days(db, promo, user, rw_client)
+
+    assert promo.used_count == 4
