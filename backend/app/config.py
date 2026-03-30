@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     vk_client_secret: str = ""
     environment: str = "development"
     frontend_url: str = "http://localhost:5173"
+    site_url: str = "http://localhost"
 
     # JWT
     access_token_expire_minutes: int = 15

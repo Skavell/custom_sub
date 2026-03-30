@@ -7,6 +7,7 @@ from app.routers import auth
 from app.routers import users
 from app.routers import plans
 from app.routers import subscriptions
+from app.routers import payments
 
 
 @asynccontextmanager
@@ -36,6 +37,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(plans.router)
 app.include_router(subscriptions.router)
+app.include_router(payments.router)
 
 
 @app.get("/api/health")
