@@ -14,7 +14,7 @@ from app.models.plan import Plan
 from app.models.transaction import Transaction, TransactionStatus, TransactionType
 from app.models.user import User
 from app.redis_client import get_redis
-from app.schemas.payment import CreatePaymentRequest, PaymentResponse
+from app.schemas.payment import CreatePaymentRequest, PaymentResponse, TransactionHistoryItem
 from app.services.payment_providers.base import InvoiceResult
 from app.services.payment_providers.factory import get_active_provider
 from app.schemas.payment import CryptoBotWebhookPayload
@@ -294,3 +294,40 @@ async def payment_webhook(
     tx.status = TransactionStatus.failed
     await db.commit()
     return Response(status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Payment history endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/history", response_model=list[TransactionHistoryItem])
+async def get_payment_history(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[TransactionHistoryItem]:
+    result = await db.execute(
+        select(Transaction)
+        .where(Transaction.user_id == current_user.id)
+        .order_by(Transaction.created_at.desc())
+        .limit(20)
+    )
+    transactions = result.scalars().all()
+    items = []
+    for tx in transactions:
+        plan_name = None
+        if tx.plan_id is not None:
+            plan_res = await db.execute(select(Plan).where(Plan.id == tx.plan_id))
+            plan_obj = plan_res.scalar_one_or_none()
+            if plan_obj:
+                plan_name = plan_obj.label
+        items.append(TransactionHistoryItem(
+            id=tx.id,
+            type=tx.type.value,
+            status=tx.status.value,
+            amount_rub=tx.amount_rub,
+            plan_name=plan_name,
+            days_added=tx.days_added,
+            created_at=tx.created_at,
+            completed_at=tx.completed_at,
+        ))
+    return items
