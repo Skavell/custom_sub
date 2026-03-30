@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user
+from app.models.support_message import SupportMessage
 from app.models.user import User
 from app.redis_client import get_redis
 from app.schemas.support import SupportMessageRequest
@@ -36,6 +37,17 @@ async def send_support_message(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Слишком много сообщений. Попробуйте позже.",
         )
+
+    # Persist message to DB (best-effort)
+    try:
+        db.add(SupportMessage(
+            user_id=current_user.id,
+            display_name=current_user.display_name,
+            message=data.message,
+        ))
+        await db.commit()
+    except Exception:
+        logger.warning("Failed to persist support message for user %s", current_user.id)
 
     user_id_short = str(current_user.id)[:8]
     text = (

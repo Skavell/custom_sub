@@ -10,17 +10,35 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from sqlalchemy.exc import IntegrityError
+
 from app.database import get_db
 from app.deps import require_admin
+from app.models.article import Article
 from app.models.auth_provider import AuthProvider
+from app.models.plan import Plan
+from app.models.promo_code import PromoCode, PromoCodeType
+from app.models.setting import Setting
+from app.models.support_message import SupportMessage
 from app.models.subscription import Subscription
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.redis_client import get_redis
 from app.schemas.admin import (
+    ArticleAdminDetail,
+    ArticleAdminListItem,
+    ArticleCreateRequest,
+    ArticleUpdateRequest,
     ConflictResolveRequest,
+    PlanAdminItem,
+    PlanUpdateRequest,
+    PromoCodeAdminItem,
+    PromoCodeCreateRequest,
     ProviderInfo,
+    SettingAdminItem,
+    SettingUpsertRequest,
     SubscriptionAdminInfo,
+    SupportMessageAdminItem,
     SyncStatusResponse,
     TransactionAdminItem,
     UserAdminDetail,
@@ -28,7 +46,7 @@ from app.schemas.admin import (
 )
 from app.services.admin_sync_service import run_sync_all
 from app.services.remnawave_client import RemnawaveClient
-from app.services.setting_service import get_setting, get_setting_decrypted
+from app.services.setting_service import get_setting, get_setting_decrypted, set_setting
 from app.services.subscription_service import sync_subscription_from_remnawave
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -215,3 +233,284 @@ async def get_sync_status(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Задача не найдена")
     data = json.loads(raw)
     return SyncStatusResponse(**data)
+
+
+# --- Admin Plans ---
+
+@router.get("/plans", response_model=list[PlanAdminItem])
+async def admin_list_plans(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[PlanAdminItem]:
+    result = await db.execute(select(Plan).order_by(Plan.sort_order.asc()))
+    plans = result.scalars().all()
+    return [PlanAdminItem.model_validate(p) for p in plans]
+
+
+@router.patch("/plans/{plan_id}", response_model=PlanAdminItem)
+async def admin_update_plan(
+    plan_id: uuid.UUID,
+    data: PlanUpdateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> PlanAdminItem:
+    plan = await db.get(Plan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Тариф не найден")
+    if data.label is not None:
+        plan.label = data.label
+    if data.duration_days is not None:
+        plan.duration_days = data.duration_days
+    if data.price_rub is not None:
+        plan.price_rub = data.price_rub
+    if data.new_user_price_rub is not None:
+        plan.new_user_price_rub = data.new_user_price_rub
+    if data.is_active is not None:
+        plan.is_active = data.is_active
+    await db.commit()
+    return PlanAdminItem.model_validate(plan)
+
+
+# --- Admin Promo Codes ---
+
+@router.get("/promo-codes", response_model=list[PromoCodeAdminItem])
+async def admin_list_promo_codes(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[PromoCodeAdminItem]:
+    result = await db.execute(select(PromoCode).order_by(PromoCode.created_at.desc()))
+    promos = result.scalars().all()
+    return [PromoCodeAdminItem.model_validate(p) for p in promos]
+
+
+@router.post("/promo-codes", response_model=PromoCodeAdminItem, status_code=201)
+async def admin_create_promo_code(
+    data: PromoCodeCreateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> PromoCodeAdminItem:
+    try:
+        promo_type = PromoCodeType(data.type)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный тип промокода")
+
+    promo = PromoCode(
+        code=data.code.upper(),
+        type=promo_type,
+        value=data.value,
+        max_uses=data.max_uses,
+        valid_until=data.valid_until,
+        is_active=data.is_active,
+    )
+    db.add(promo)
+    try:
+        await db.flush()
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Промокод уже существует")
+    await db.refresh(promo)
+    return PromoCodeAdminItem.model_validate(promo)
+
+
+@router.patch("/promo-codes/{code_id}/toggle", response_model=PromoCodeAdminItem)
+async def admin_toggle_promo_code(
+    code_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> PromoCodeAdminItem:
+    promo = await db.get(PromoCode, code_id)
+    if promo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Промокод не найден")
+    promo.is_active = not promo.is_active
+    await db.commit()
+    return PromoCodeAdminItem.model_validate(promo)
+
+
+@router.delete("/promo-codes/{code_id}", status_code=204)
+async def admin_delete_promo_code(
+    code_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    promo = await db.get(PromoCode, code_id)
+    if promo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Промокод не найден")
+    await db.delete(promo)
+    await db.commit()
+
+
+# --- Admin Articles ---
+
+@router.get("/articles", response_model=list[ArticleAdminListItem])
+async def admin_list_articles(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[ArticleAdminListItem]:
+    result = await db.execute(select(Article).order_by(Article.sort_order.asc()))
+    articles = result.scalars().all()
+    return [ArticleAdminListItem.model_validate(a) for a in articles]
+
+
+@router.post("/articles", response_model=ArticleAdminDetail, status_code=201)
+async def admin_create_article(
+    data: ArticleCreateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ArticleAdminDetail:
+    article = Article(
+        slug=data.slug,
+        title=data.title,
+        content=data.content,
+        preview_image_url=data.preview_image_url,
+        sort_order=data.sort_order,
+        is_published=data.is_published,
+    )
+    db.add(article)
+    try:
+        await db.flush()
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Slug уже существует")
+    await db.refresh(article)
+    return ArticleAdminDetail.model_validate(article)
+
+
+@router.get("/articles/{article_id}", response_model=ArticleAdminDetail)
+async def admin_get_article(
+    article_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ArticleAdminDetail:
+    article = await db.get(Article, article_id)
+    if article is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Статья не найдена")
+    return ArticleAdminDetail.model_validate(article)
+
+
+@router.patch("/articles/{article_id}", response_model=ArticleAdminDetail)
+async def admin_update_article(
+    article_id: uuid.UUID,
+    data: ArticleUpdateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ArticleAdminDetail:
+    article = await db.get(Article, article_id)
+    if article is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Статья не найдена")
+    if data.slug is not None:
+        article.slug = data.slug
+    if data.title is not None:
+        article.title = data.title
+    if data.content is not None:
+        article.content = data.content
+    if data.preview_image_url is not None:
+        article.preview_image_url = data.preview_image_url
+    if data.sort_order is not None:
+        article.sort_order = data.sort_order
+    try:
+        await db.flush()
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Slug уже существует")
+    await db.refresh(article)
+    return ArticleAdminDetail.model_validate(article)
+
+
+@router.delete("/articles/{article_id}", status_code=204)
+async def admin_delete_article(
+    article_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    article = await db.get(Article, article_id)
+    if article is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Статья не найдена")
+    await db.delete(article)
+    await db.commit()
+
+
+@router.post("/articles/{article_id}/publish", response_model=ArticleAdminDetail)
+async def admin_publish_article(
+    article_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ArticleAdminDetail:
+    article = await db.get(Article, article_id)
+    if article is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Статья не найдена")
+    article.is_published = True
+    await db.commit()
+    return ArticleAdminDetail.model_validate(article)
+
+
+@router.post("/articles/{article_id}/unpublish", response_model=ArticleAdminDetail)
+async def admin_unpublish_article(
+    article_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ArticleAdminDetail:
+    article = await db.get(Article, article_id)
+    if article is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Статья не найдена")
+    article.is_published = False
+    await db.commit()
+    return ArticleAdminDetail.model_validate(article)
+
+
+# --- Admin Settings ---
+
+@router.get("/settings", response_model=list[SettingAdminItem])
+async def admin_list_settings(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[SettingAdminItem]:
+    result = await db.execute(select(Setting).order_by(Setting.key.asc()))
+    settings_list = result.scalars().all()
+    return [
+        SettingAdminItem(
+            key=s.key,
+            value="***" if s.is_sensitive else (s.value.get("value") or ""),
+            is_sensitive=s.is_sensitive,
+            updated_at=s.updated_at,
+        )
+        for s in settings_list
+    ]
+
+
+@router.put("/settings/{key}", response_model=SettingAdminItem)
+async def admin_upsert_setting(
+    key: str,
+    data: SettingUpsertRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> SettingAdminItem:
+    from datetime import datetime, timezone
+    await set_setting(db, key, data.value, data.is_sensitive)
+    return SettingAdminItem(
+        key=key,
+        value="***" if data.is_sensitive else data.value,
+        is_sensitive=data.is_sensitive,
+        updated_at=datetime.now(tz=timezone.utc),
+    )
+
+
+# --- Admin Support Messages ---
+
+@router.get("/support-messages", response_model=list[SupportMessageAdminItem])
+async def admin_list_support_messages(
+    skip: int = 0,
+    limit: int = 50,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[SupportMessageAdminItem]:
+    result = await db.execute(
+        select(SupportMessage)
+        .order_by(SupportMessage.created_at.desc())
+        .offset(skip)
+        .limit(min(limit, 200))
+    )
+    messages = result.scalars().all()
+    return [SupportMessageAdminItem.model_validate(m) for m in messages]

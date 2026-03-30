@@ -419,3 +419,619 @@ async def test_admin_sync_status_not_found_returns_404():
         app.dependency_overrides.clear()
 
     assert resp.status_code == 404
+
+from app.models.plan import Plan as PlanModel
+
+
+# --- GET /api/admin/plans ---
+
+@pytest.mark.asyncio
+async def test_admin_plans_list_returns_all_including_inactive():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+
+    plan = MagicMock(spec=PlanModel)
+    plan.id = uuid.uuid4()
+    plan.name = "basic"
+    plan.label = "Базовый"
+    plan.duration_days = 30
+    plan.price_rub = 300
+    plan.new_user_price_rub = None
+    plan.is_active = False  # inactive — must still appear
+    plan.sort_order = 0
+
+    result_mock = MagicMock()
+    result_mock.scalars.return_value.all.return_value = [plan]
+    db.execute = AsyncMock(return_value=result_mock)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/admin/plans")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["is_active"] is False
+    assert data[0]["label"] == "Базовый"
+
+
+@pytest.mark.asyncio
+async def test_admin_plan_patch_updates_fields():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+
+    plan = MagicMock(spec=PlanModel)
+    plan.id = uuid.uuid4()
+    plan.name = "basic"
+    plan.label = "Базовый"
+    plan.duration_days = 30
+    plan.price_rub = 300
+    plan.new_user_price_rub = None
+    plan.is_active = True
+    plan.sort_order = 0
+
+    db.get = AsyncMock(return_value=plan)
+    db.commit = AsyncMock()
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.patch(
+                f"/api/admin/plans/{plan.id}",
+                json={"price_rub": 500, "is_active": False},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert plan.price_rub == 500
+    assert plan.is_active is False
+    db.commit.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_plan_patch_not_found_returns_404():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    db.get = AsyncMock(return_value=None)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.patch(f"/api/admin/plans/{uuid.uuid4()}", json={"price_rub": 100})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 404
+
+
+from app.models.promo_code import PromoCode as PromoCodeModel, PromoCodeType
+from sqlalchemy.exc import IntegrityError
+
+
+# --- GET /api/admin/promo-codes ---
+
+@pytest.mark.asyncio
+async def test_admin_promo_list_returns_all():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+
+    promo = MagicMock(spec=PromoCodeModel)
+    promo.id = uuid.uuid4()
+    promo.code = "SALE10"
+    promo.type = PromoCodeType.discount_percent
+    promo.value = 10
+    promo.max_uses = None
+    promo.used_count = 0
+    promo.valid_until = None
+    promo.is_active = True
+    promo.created_at = NOW
+
+    result_mock = MagicMock()
+    result_mock.scalars.return_value.all.return_value = [promo]
+    db.execute = AsyncMock(return_value=result_mock)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/admin/promo-codes")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["code"] == "SALE10"
+
+
+@pytest.mark.asyncio
+async def test_admin_promo_create_success():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    # After refresh, simulate DB populating server-default fields
+    async def _refresh_promo(obj):
+        obj.id = uuid.uuid4()
+        obj.used_count = 0
+        obj.created_at = NOW
+    db.refresh = AsyncMock(side_effect=_refresh_promo)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/api/admin/promo-codes",
+                json={"code": "test10", "type": "discount_percent", "value": 10},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["code"] == "TEST10"  # uppercased
+
+
+@pytest.mark.asyncio
+async def test_admin_promo_create_duplicate_returns_409():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    db.add = MagicMock()
+    db.flush = AsyncMock(side_effect=IntegrityError("duplicate", {}, Exception()))
+    db.rollback = AsyncMock()
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/api/admin/promo-codes",
+                json={"code": "EXISTING", "type": "bonus_days", "value": 7},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_admin_promo_toggle_flips_is_active():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+
+    promo = MagicMock(spec=PromoCodeModel)
+    promo.id = uuid.uuid4()
+    promo.code = "SALE10"
+    promo.type = PromoCodeType.discount_percent
+    promo.value = 10
+    promo.max_uses = None
+    promo.used_count = 0
+    promo.valid_until = None
+    promo.is_active = True
+    promo.created_at = NOW
+
+    db.get = AsyncMock(return_value=promo)
+    db.commit = AsyncMock()
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.patch(f"/api/admin/promo-codes/{promo.id}/toggle")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert promo.is_active is False
+    db.commit.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_promo_delete_success():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    promo = MagicMock(spec=PromoCodeModel)
+    db.get = AsyncMock(return_value=promo)
+    db.delete = AsyncMock()
+    db.commit = AsyncMock()
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.delete(f"/api/admin/promo-codes/{uuid.uuid4()}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 204
+    db.delete.assert_called_once_with(promo)
+    db.commit.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_promo_delete_not_found_returns_404():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    db.get = AsyncMock(return_value=None)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.delete(f"/api/admin/promo-codes/{uuid.uuid4()}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 404
+
+
+from app.models.article import Article as ArticleModel
+
+
+def _make_article(published=True):
+    a = MagicMock(spec=ArticleModel)
+    a.id = uuid.uuid4()
+    a.slug = "test-article"
+    a.title = "Тест"
+    a.content = "Содержимое"
+    a.preview_image_url = None
+    a.is_published = published
+    a.sort_order = 0
+    a.created_at = NOW
+    a.updated_at = NOW
+    return a
+
+
+# --- GET /api/admin/articles ---
+
+@pytest.mark.asyncio
+async def test_admin_articles_list_includes_unpublished():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    article = _make_article(published=False)
+
+    result_mock = MagicMock()
+    result_mock.scalars.return_value.all.return_value = [article]
+    db.execute = AsyncMock(return_value=result_mock)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/admin/articles")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["is_published"] is False
+
+
+@pytest.mark.asyncio
+async def test_admin_article_create_success():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    # After refresh, simulate DB populating server-default fields
+    async def _refresh_article(obj):
+        obj.id = uuid.uuid4()
+        obj.created_at = NOW
+        obj.updated_at = NOW
+    db.refresh = AsyncMock(side_effect=_refresh_article)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/api/admin/articles",
+                json={"slug": "new-article", "title": "Новая", "content": "Текст"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_admin_article_create_duplicate_slug_returns_409():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    db.add = MagicMock()
+    db.flush = AsyncMock(side_effect=IntegrityError("duplicate", {}, Exception()))
+    db.rollback = AsyncMock()
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/api/admin/articles",
+                json={"slug": "existing-slug", "title": "Новая", "content": "Текст"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_admin_article_get_not_found_returns_404():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    db.get = AsyncMock(return_value=None)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get(f"/api/admin/articles/{uuid.uuid4()}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_admin_article_patch_updates_title():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    article = _make_article()
+    db.get = AsyncMock(return_value=article)
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.patch(
+                f"/api/admin/articles/{article.id}",
+                json={"title": "Обновлённый заголовок"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert article.title == "Обновлённый заголовок"
+
+
+@pytest.mark.asyncio
+async def test_admin_article_delete_success():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    article = _make_article()
+    db.get = AsyncMock(return_value=article)
+    db.delete = AsyncMock()
+    db.commit = AsyncMock()
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.delete(f"/api/admin/articles/{article.id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 204
+    db.delete.assert_called_once_with(article)
+
+
+@pytest.mark.asyncio
+async def test_admin_article_publish_sets_published():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    article = _make_article(published=False)
+    db.get = AsyncMock(return_value=article)
+    db.commit = AsyncMock()
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(f"/api/admin/articles/{article.id}/publish")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert article.is_published is True
+
+
+@pytest.mark.asyncio
+async def test_admin_article_unpublish_clears_published():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+    article = _make_article(published=True)
+    db.get = AsyncMock(return_value=article)
+    db.commit = AsyncMock()
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(f"/api/admin/articles/{article.id}/unpublish")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert article.is_published is False
+
+
+from app.models.setting import Setting as SettingModel
+
+
+# --- GET /api/admin/settings ---
+
+@pytest.mark.asyncio
+async def test_admin_settings_list_masks_sensitive():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+
+    s = MagicMock(spec=SettingModel)
+    s.key = "telegram_bot_token"
+    s.value = {"encrypted": "abc123"}
+    s.is_sensitive = True
+    s.updated_at = NOW
+
+    result_mock = MagicMock()
+    result_mock.scalars.return_value.all.return_value = [s]
+    db.execute = AsyncMock(return_value=result_mock)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/admin/settings")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["value"] == "***"
+    assert data[0]["is_sensitive"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_settings_list_shows_plain_value():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+
+    s = MagicMock(spec=SettingModel)
+    s.key = "remnawave_url"
+    s.value = {"value": "http://rw.example.com"}
+    s.is_sensitive = False
+    s.updated_at = NOW
+
+    result_mock = MagicMock()
+    result_mock.scalars.return_value.all.return_value = [s]
+    db.execute = AsyncMock(return_value=result_mock)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/admin/settings")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["value"] == "http://rw.example.com"
+
+
+@pytest.mark.asyncio
+async def test_admin_settings_upsert_plain():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+
+    with patch("app.routers.admin.set_setting", new_callable=AsyncMock) as mock_set:
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.put(
+                    "/api/admin/settings/remnawave_url",
+                    json={"value": "http://rw.example.com", "is_sensitive": False},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    mock_set.assert_called_once_with(db, "remnawave_url", "http://rw.example.com", False)
+    data = resp.json()
+    assert data["value"] == "http://rw.example.com"
+
+
+@pytest.mark.asyncio
+async def test_admin_settings_upsert_sensitive_masks_value():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+
+    with patch("app.routers.admin.set_setting", new_callable=AsyncMock) as mock_set:
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.put(
+                    "/api/admin/settings/telegram_bot_token",
+                    json={"value": "secret_token", "is_sensitive": True},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    mock_set.assert_called_once_with(db, "telegram_bot_token", "secret_token", True)
+    data = resp.json()
+    assert data["value"] == "***"
+    assert data["is_sensitive"] is True
+
+
+from app.models.support_message import SupportMessage as SupportMessageModel
+
+
+# --- GET /api/admin/support-messages ---
+
+@pytest.mark.asyncio
+async def test_admin_support_messages_list_returns_items():
+    admin = _make_admin()
+    db = AsyncMock(spec=AsyncSession)
+
+    msg = MagicMock(spec=SupportMessageModel)
+    msg.id = uuid.uuid4()
+    msg.user_id = uuid.uuid4()
+    msg.display_name = "Иван"
+    msg.message = "Нужна помощь"
+    msg.created_at = NOW
+
+    result_mock = MagicMock()
+    result_mock.scalars.return_value.all.return_value = [msg]
+    db.execute = AsyncMock(return_value=result_mock)
+
+    app.dependency_overrides[require_admin] = _override_admin(admin)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/admin/support-messages")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["display_name"] == "Иван"
+    assert data[0]["message"] == "Нужна помощь"
+
+
+@pytest.mark.asyncio
+async def test_admin_support_messages_not_admin_returns_403():
+    from fastapi import HTTPException
+
+    def _not_admin():
+        raise HTTPException(status_code=403, detail="Admin required")
+
+    app.dependency_overrides[require_admin] = _not_admin
+    app.dependency_overrides[get_db] = _override_db(AsyncMock(spec=AsyncSession))
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/admin/support-messages")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 403

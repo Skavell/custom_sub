@@ -12,6 +12,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.redis_client import get_redis
 from app.models.user import User
+from app.models.support_message import SupportMessage
 
 
 def _make_user():
@@ -118,3 +119,35 @@ async def test_support_no_telegram_config_still_returns_200():
             app.dependency_overrides.clear()
 
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_support_message_persists_to_db():
+    """After posting a support message, a SupportMessage row is added to the DB."""
+    user = _make_user()
+    redis = AsyncMock(spec=Redis)
+    redis.incr = AsyncMock(return_value=1)
+    redis.expire = AsyncMock()
+    db = AsyncMock(spec=AsyncSession)
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    app.dependency_overrides[get_current_user] = _override_user(user)
+    app.dependency_overrides[get_db] = _override_db(db)
+    app.dependency_overrides[get_redis] = _override_redis(redis)
+
+    with patch("app.routers.support.get_setting", return_value="chat_id"), \
+         patch("app.routers.support.get_setting_decrypted", return_value="token"), \
+         patch("app.routers.support.send_admin_alert", new_callable=AsyncMock):
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.post("/api/support/message", json={"message": "Нужна помощь"})
+        finally:
+            app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    db.add.assert_called_once()
+    added_obj = db.add.call_args[0][0]
+    assert isinstance(added_obj, SupportMessage)
+    assert added_obj.message == "Нужна помощь"
+    assert added_obj.display_name == user.display_name
