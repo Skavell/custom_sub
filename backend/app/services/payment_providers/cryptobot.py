@@ -40,6 +40,8 @@ class CryptoBotProvider(PaymentProvider):
             )
             resp.raise_for_status()
             data = resp.json()
+        if not data.get("ok"):
+            raise ValueError(f"CryptoBot API error: {data.get('error', data)}")
         result = data["result"]
         return InvoiceResult(
             payment_url=result["bot_invoice_url"],

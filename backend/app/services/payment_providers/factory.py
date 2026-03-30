@@ -17,6 +17,8 @@ async def get_active_provider(db: AsyncSession) -> PaymentProvider:
         rate_str = await get_setting(db, "usdt_exchange_rate") or "83"
         try:
             rate = float(rate_str)
+            if rate <= 0:
+                rate = 83.0
         except ValueError:
             rate = 83.0
         return CryptoBotProvider(token=token, usdt_rate=rate)

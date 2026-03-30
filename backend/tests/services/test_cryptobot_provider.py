@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
@@ -64,7 +65,7 @@ async def test_create_invoice_http_error_raises(httpx_mock: HTTPXMock):
         status_code=500,
     )
     provider = CryptoBotProvider(token=TOKEN, usdt_rate=RATE)
-    with pytest.raises(Exception):
+    with pytest.raises(httpx.HTTPStatusError):
         await provider.create_invoice(amount_rub=200, order_id="x", description="test")
 
 
@@ -80,3 +81,17 @@ def test_verify_webhook_invalid_signature():
     provider = CryptoBotProvider(token=TOKEN, usdt_rate=RATE)
     raw_body = b'{"update_type":"invoice_paid"}'
     assert provider.verify_webhook(raw_body, {"crypto-pay-api-signature": "deadbeef"}) is False
+
+
+@pytest.mark.asyncio
+async def test_create_invoice_api_error_raises(httpx_mock: HTTPXMock):
+    """HTTP 200 with ok=false should raise, not silently fail."""
+    httpx_mock.add_response(
+        method="POST",
+        url="https://pay.crypt.bot/api/createInvoice",
+        json={"ok": False, "error": {"code": 401, "name": "UNAUTHORIZED"}},
+        status_code=200,
+    )
+    provider = CryptoBotProvider(token=TOKEN, usdt_rate=RATE)
+    with pytest.raises(ValueError):
+        await provider.create_invoice(amount_rub=200, order_id="x", description="test")
