@@ -32,6 +32,7 @@ class Transaction(Base):
     days_added: Mapped[int | None] = mapped_column(Integer, nullable=True)
     payment_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
     external_payment_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    payment_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     status: Mapped[TransactionStatus] = mapped_column(Enum(TransactionStatus))
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
