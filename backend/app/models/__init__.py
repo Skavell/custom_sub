@@ -7,11 +7,12 @@ from app.models.transaction import Transaction, TransactionType, TransactionStat
 from app.models.promo_code import PromoCode, PromoCodeUsage, PromoCodeType
 from app.models.article import Article
 from app.models.setting import Setting
+from app.models.support_message import SupportMessage
 
 __all__ = [
     "Base", "User", "AuthProvider", "ProviderType",
     "Subscription", "SubscriptionType", "SubscriptionStatus",
     "Plan", "Transaction", "TransactionType", "TransactionStatus",
     "PromoCode", "PromoCodeUsage", "PromoCodeType",
-    "Article", "Setting",
+    "Article", "Setting", "SupportMessage",
 ]
