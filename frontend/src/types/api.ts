@@ -81,3 +81,61 @@ export interface InstallLinkResponse {
 export interface ApiError {
   detail: string
 }
+
+// Added in Plan 9
+
+export interface SubscriptionResponse {
+  type: 'trial' | 'paid'
+  status: 'active' | 'expired' | 'disabled'
+  started_at: string
+  expires_at: string
+  traffic_limit_gb: number | null
+  days_remaining: number
+}
+
+export interface TrialActivateResponse {
+  subscription: SubscriptionResponse
+  message: string
+}
+
+export interface PaymentResponse {
+  payment_url: string
+  transaction_id: string
+  amount_rub: number
+  amount_usdt: string
+  is_existing: boolean
+}
+
+export interface TransactionHistoryItem {
+  id: string
+  type: string
+  status: string
+  amount_rub: number | null
+  plan_name: string | null
+  days_added: number | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface ArticleListItem {
+  id: string
+  slug: string
+  title: string
+  preview_image_url: string | null
+  sort_order: number
+  created_at: string
+}
+
+export interface ArticleDetailResponse extends ArticleListItem {
+  content: string
+  updated_at: string
+}
+
+export interface ApplyPromoRequest {
+  code: string
+}
+
+export interface CreatePaymentRequest {
+  plan_id: string
+  promo_code?: string | null
+}
