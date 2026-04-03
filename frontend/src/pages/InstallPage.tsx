@@ -18,7 +18,7 @@ function detectOS(): OS {
   return 'linux'
 }
 
-const OS_TABS: { id: OS; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
+const OS_TABS: { id: OS; label: string; icon: React.ComponentType<{ size?: string | number; className?: string }> }[] = [
   { id: 'android', label: 'Android', icon: Smartphone },
   { id: 'ios', label: 'iOS', icon: Smartphone },
   { id: 'windows', label: 'Windows', icon: Monitor },
