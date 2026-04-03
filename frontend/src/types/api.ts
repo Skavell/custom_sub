@@ -116,3 +116,170 @@ export interface CreatePaymentRequest {
   plan_id: string
   promo_code?: string | null
 }
+
+// ─── Admin types (Plan 10) ───────────────────────────────────────────────────
+
+// Admin-specific provider info (different from user-facing ProviderInfo)
+export interface AdminProviderInfo {
+  provider: string
+  provider_user_id: string
+  provider_username: string | null
+  created_at: string
+}
+
+export interface UserAdminListItem {
+  id: string
+  display_name: string
+  providers: string[]           // list of provider type strings e.g. ["telegram"]
+  subscription_status: string | null
+  subscription_expires_at: string | null
+  remnawave_uuid: string | null
+  subscription_conflict: boolean
+  created_at: string
+}
+
+export interface PaginatedUsers {
+  items: UserAdminListItem[]
+  total: number
+  page: number
+  per_page: number
+}
+
+export interface AdminSubscriptionInfo {
+  type: string
+  status: string
+  started_at: string
+  expires_at: string
+  traffic_limit_gb: number | null
+  synced_at: string | null
+}
+
+export interface AdminTransactionItem {
+  id: string
+  type: string
+  status: string
+  amount_rub: number | null
+  days_added: number | null
+  description: string | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface UserAdminDetail {
+  id: string
+  display_name: string
+  avatar_url: string | null
+  is_admin: boolean
+  has_made_payment: boolean
+  subscription_conflict: boolean
+  remnawave_uuid: string | null
+  created_at: string
+  last_seen_at: string
+  providers: AdminProviderInfo[]
+  subscription: AdminSubscriptionInfo | null
+  recent_transactions: AdminTransactionItem[]
+}
+
+export interface ConflictResolveRequest {
+  remnawave_uuid: string
+}
+
+export interface SyncAllResponse {
+  task_id: string
+}
+
+// Backend fields: status, total, done (int), errors (int count)
+export interface SyncStatusResponse {
+  status: 'running' | 'completed' | 'failed' | 'timed_out'
+  total: number
+  done: number
+  errors: number
+}
+
+export interface PlanAdminItem {
+  id: string
+  name: string
+  label: string
+  duration_days: number
+  price_rub: number
+  new_user_price_rub: number | null
+  is_active: boolean
+  sort_order: number
+}
+
+export interface PlanAdminUpdateRequest {
+  price_rub?: number
+  new_user_price_rub?: number | null
+  duration_days?: number
+  label?: string
+  is_active?: boolean
+}
+
+export interface PromoCodeAdminItem {
+  id: string
+  code: string
+  type: 'discount_percent' | 'bonus_days'
+  value: number
+  max_uses: number | null
+  used_count: number
+  valid_until: string | null
+  is_active: boolean
+  created_at: string
+}
+
+export interface PromoCodeCreateRequest {
+  code: string
+  type: 'discount_percent' | 'bonus_days'
+  value: number
+  max_uses?: number | null
+  valid_until?: string | null
+}
+
+export interface ArticleAdminListItem {
+  id: string
+  slug: string
+  title: string
+  is_published: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ArticleAdminDetail extends ArticleAdminListItem {
+  content: string
+  preview_image_url: string | null
+}
+
+export interface ArticleAdminCreateRequest {
+  slug: string
+  title: string
+  content: string
+  preview_image_url?: string | null
+  sort_order?: number
+}
+
+export interface ArticleAdminUpdateRequest {
+  slug?: string
+  title?: string
+  content?: string
+  preview_image_url?: string | null
+  sort_order?: number
+}
+
+export interface SettingAdminItem {
+  key: string
+  value: string | null
+  is_sensitive: boolean
+  updated_at: string
+}
+
+export interface SupportMessageAdminItem {
+  id: string
+  user_id: string
+  display_name: string
+  message: string
+  created_at: string
+}
+
+// Note: support-messages endpoint returns a plain list (no pagination wrapper).
+// Use ?skip=N&limit=50 params.
