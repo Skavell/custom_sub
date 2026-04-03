@@ -13,15 +13,6 @@ export interface UserProfile {
   providers: ProviderInfo[]
 }
 
-export interface Subscription {
-  type: 'trial' | 'paid'
-  status: 'active' | 'expired' | 'disabled'
-  started_at: string
-  expires_at: string
-  traffic_limit_gb: number | null
-  synced_at: string | null
-}
-
 export interface Plan {
   id: string
   name: string
@@ -30,20 +21,6 @@ export interface Plan {
   price_rub: number
   new_user_price_rub: number | null
   sort_order: number
-}
-
-export interface Article {
-  id: string
-  slug: string
-  title: string
-  preview_image_url: string | null
-  sort_order: number
-  created_at: string
-}
-
-export interface ArticleDetail extends Article {
-  content: string
-  updated_at: string
 }
 
 export interface Transaction {
@@ -108,8 +85,8 @@ export interface PaymentResponse {
 
 export interface TransactionHistoryItem {
   id: string
-  type: string
-  status: string
+  type: 'trial_activation' | 'payment' | 'promo_bonus' | 'manual'
+  status: 'pending' | 'completed' | 'failed'
   amount_rub: number | null
   plan_name: string | null
   days_added: number | null
