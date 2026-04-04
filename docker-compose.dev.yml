@@ -13,6 +13,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
+    command: sh -c "uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     volumes:
       - ./backend:/app
       # Prevent Windows .venv from overwriting the Linux venv built inside the image
@@ -23,6 +24,8 @@ services:
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql+asyncpg://skavellion:password@postgres:5432/skavellion
       - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=dev-secret-key-32-chars-minimum-here
+      - SETTINGS_ENCRYPTION_KEY=dev-enc-key-32-chars-here-padding!
 
 volumes:
   backend_venv:

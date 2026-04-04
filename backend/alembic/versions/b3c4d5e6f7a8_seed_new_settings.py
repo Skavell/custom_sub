@@ -53,7 +53,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     conn = op.get_bind()
     keys = [k for k, _, _ in _SETTINGS]
-    conn.execute(
-        sa.text("DELETE FROM settings WHERE key = ANY(:keys)"),
-        {"keys": keys},
-    )
+    for key in keys:
+        conn.execute(
+            sa.text("DELETE FROM settings WHERE key = :key"),
+            {"key": key},
+        )

@@ -12,6 +12,7 @@ import DocsArticlePage from '@/pages/DocsArticlePage'
 import SupportPage from '@/pages/SupportPage'
 import ProfilePage from '@/pages/ProfilePage'
 import NotFoundPage from '@/pages/NotFoundPage'
+import GoogleCallbackPage from '@/pages/GoogleCallbackPage'
 import AdminUsersPage from '@/pages/admin/AdminUsersPage'
 import AdminUserDetailPage from '@/pages/admin/AdminUserDetailPage'
 import AdminSyncPage from '@/pages/admin/AdminSyncPage'
@@ -27,6 +28,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/auth/google/callback" element={<GoogleCallbackPage />} />
 
         {/* Admin routes */}
         <Route element={<AdminRoute />}>

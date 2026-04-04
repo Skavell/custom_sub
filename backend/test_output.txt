@@ -1,0 +1,11 @@
+........................................................................ [ 69%]
+................................                                         [100%]
+============================== warnings summary ===============================
+tests/routers/test_payments_webhook.py::test_webhook_paid_remnawave_failure_returns_500
+  E:\Projects\vpn\custom_sub_pages\backend\.venv\Lib\site-packages\_pytest\stash.py:108: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    del self._storage[key]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+104 passed, 1 warning in 5.10s

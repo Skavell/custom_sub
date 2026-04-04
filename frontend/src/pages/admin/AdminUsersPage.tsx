@@ -3,21 +3,28 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Search, AlertTriangle } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
-import type { PaginatedUsers } from '@/types/api'
+import type { UserAdminListItem } from '@/types/api'
+
+const PAGE_SIZE = 50
 
 export default function AdminUsersPage() {
   const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
+  const [skip, setSkip] = useState(0)
   const navigate = useNavigate()
 
-  const { data, isLoading, error } = useQuery<PaginatedUsers>({
-    queryKey: ['admin-users', page, search],
+  const { data, isLoading, error } = useQuery<UserAdminListItem[]>({
+    queryKey: ['admin-users', skip, search],
     queryFn: () =>
-      api.get<PaginatedUsers>(
-        `/api/admin/users?page=${page}&per_page=20&search=${encodeURIComponent(search)}`,
+      api.get<UserAdminListItem[]>(
+        `/api/admin/users?skip=${skip}&limit=${PAGE_SIZE}${search ? `&q=${encodeURIComponent(search)}` : ''}`,
       ),
     staleTime: 30_000,
   })
+
+  function handleSearch(value: string) {
+    setSearch(value)
+    setSkip(0)
+  }
 
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto">
@@ -29,7 +36,7 @@ export default function AdminUsersPage() {
           type="text"
           placeholder="Поиск по имени..."
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+          onChange={(e) => handleSearch(e.target.value)}
           className="w-full rounded-input bg-surface border border-border-neutral pl-9 pr-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
         />
       </div>
@@ -49,10 +56,10 @@ export default function AdminUsersPage() {
       {data && (
         <>
           <div className="flex flex-col gap-1">
-            {data.items.length === 0 && (
+            {data.length === 0 && (
               <p className="text-sm text-text-muted text-center py-8">Пользователи не найдены</p>
             )}
-            {data.items.map((user) => (
+            {data.map((user) => (
               <button
                 key={user.id}
                 onClick={() => navigate(`/admin/users/${user.id}`)}
@@ -106,27 +113,25 @@ export default function AdminUsersPage() {
             ))}
           </div>
 
-          {data.total > 20 && (
-            <div className="flex items-center justify-between mt-4">
+          <div className="flex items-center justify-between mt-4">
+            {skip > 0 && (
               <button
-                disabled={page === 1}
-                onClick={() => setPage((p) => p - 1)}
-                className="text-sm text-accent disabled:text-text-muted disabled:cursor-not-allowed"
+                onClick={() => setSkip((s) => Math.max(0, s - PAGE_SIZE))}
+                className="text-sm text-accent"
               >
                 ← Назад
               </button>
-              <span className="text-xs text-text-muted">
-                {(page - 1) * 20 + 1}–{Math.min(page * 20, data.total)} из {data.total}
-              </span>
+            )}
+            <div className="flex-1" />
+            {data.length === PAGE_SIZE && (
               <button
-                disabled={page * 20 >= data.total}
-                onClick={() => setPage((p) => p + 1)}
-                className="text-sm text-accent disabled:text-text-muted disabled:cursor-not-allowed"
+                onClick={() => setSkip((s) => s + PAGE_SIZE)}
+                className="text-sm text-accent"
               >
-                Вперёд →
+                Ещё →
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </>
       )}
     </div>
