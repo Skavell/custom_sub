@@ -10,6 +10,7 @@ import type {
   ValidatePromoResponse,
   PaymentResponse,
   ApplyPromoRequest,
+  ApplyPromoResponse,
   CreatePaymentRequest,
 } from '@/types/api'
 
@@ -142,7 +143,7 @@ export default function SubscriptionPage() {
 
   const applyBonusMutation = useMutation({
     mutationFn: (req: ApplyPromoRequest) =>
-      api.post('/api/promo-codes/apply', req),
+      api.post<ApplyPromoResponse>('/api/promo-codes/apply', req),
   })
 
   function handlePay() {
@@ -231,10 +232,9 @@ export default function SubscriptionPage() {
             )}
             {applyBonusMutation.isSuccess && (
               <p className="mt-1 text-xs text-emerald-400">
-                {(() => {
-                  const d = applyBonusMutation.data as { days_added: number; new_expires_at: string }
-                  return `Готово! +${d.days_added} дн. Новый срок: ${formatDate(d.new_expires_at)}`
-                })()}
+                {applyBonusMutation.data
+                  ? `Готово! +${applyBonusMutation.data.days_added} дн. Новый срок: ${formatDate(applyBonusMutation.data.new_expires_at)}`
+                  : null}
               </p>
             )}
             {applyBonusMutation.isError && (

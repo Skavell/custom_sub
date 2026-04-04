@@ -125,7 +125,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (!canAddTelegram || !oauthConfig?.telegram_bot_username || !telegramLinkRef.current) return
-    ;(window as Record<string, unknown>).__onTelegramLink = async (tgUser: Record<string, unknown>) => {
+    ;(window as unknown as Record<string, unknown>).__onTelegramLink = async (tgUser: Record<string, unknown>) => {
       try {
         await api.post('/api/users/me/providers/telegram', tgUser)
         queryClient.invalidateQueries({ queryKey: ['me'] })
@@ -142,7 +142,7 @@ export default function ProfilePage() {
     script.setAttribute('data-request-access', 'write')
     script.async = true
     telegramLinkRef.current.appendChild(script)
-    return () => { delete (window as Record<string, unknown>).__onTelegramLink }
+    return () => { delete (window as unknown as Record<string, unknown>).__onTelegramLink }
   }, [canAddTelegram, oauthConfig?.telegram_bot_username])
 
   if (authLoading) {

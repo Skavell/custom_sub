@@ -46,7 +46,7 @@ function TelegramLoginButton({
 
   useEffect(() => {
     if (!ref.current || !botUsername) return
-    ;(window as Record<string, unknown>).__onTelegramAuth = onAuth
+    ;(window as unknown as Record<string, unknown>).__onTelegramAuth = onAuth
     const script = document.createElement('script')
     script.src = 'https://telegram.org/js/telegram-widget.js?22'
     script.setAttribute('data-telegram-login', botUsername)
@@ -56,7 +56,7 @@ function TelegramLoginButton({
     script.async = true
     ref.current.appendChild(script)
     return () => {
-      delete (window as Record<string, unknown>).__onTelegramAuth
+      delete (window as unknown as Record<string, unknown>).__onTelegramAuth
     }
   }, [botUsername, onAuth])
 
