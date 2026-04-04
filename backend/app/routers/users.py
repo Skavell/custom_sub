@@ -7,6 +7,12 @@ from app.deps import get_current_user
 from app.models.user import User
 from app.models.auth_provider import AuthProvider, ProviderType
 from app.schemas.user import UserProfileResponse, ProviderInfo
+from app.schemas.auth import GoogleOAuthRequest, VKOAuthRequest, TelegramOAuthRequest, LinkEmailRequest
+from app.services.auth.oauth.google import exchange_google_code
+from app.services.auth.oauth.vk import exchange_vk_code
+from app.services.auth.oauth.telegram import verify_telegram_data, parse_telegram_user
+from app.services.auth.password_service import hash_password
+from app.services.setting_service import get_setting
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -80,3 +86,114 @@ async def delete_provider(
 
     await db.delete(target)
     await db.commit()
+
+
+async def _check_provider_not_taken(
+    db: AsyncSession,
+    provider: ProviderType,
+    provider_user_id: str,
+) -> None:
+    """Raise 409 if provider is already linked to any user."""
+    result = await db.execute(
+        select(AuthProvider).where(
+            AuthProvider.provider == provider,
+            AuthProvider.provider_user_id == provider_user_id,
+        )
+    )
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Этот аккаунт уже привязан",
+        )
+
+
+@router.post("/me/providers/google", status_code=200)
+async def link_google(
+    data: GoogleOAuthRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    try:
+        g_user = await exchange_google_code(data.code, data.redirect_uri)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Google OAuth failed")
+    await _check_provider_not_taken(db, ProviderType.google, g_user.id)
+    db.add(AuthProvider(
+        user_id=current_user.id,
+        provider=ProviderType.google,
+        provider_user_id=g_user.id,
+    ))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/me/providers/vk", status_code=200)
+async def link_vk(
+    data: VKOAuthRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    try:
+        vk_user = await exchange_vk_code(data.code, data.redirect_uri, data.device_id, data.state)
+    except Exception:
+        raise HTTPException(status_code=400, detail="VK OAuth failed")
+    await _check_provider_not_taken(db, ProviderType.vk, vk_user.id)
+    db.add(AuthProvider(
+        user_id=current_user.id,
+        provider=ProviderType.vk,
+        provider_user_id=vk_user.id,
+        provider_username=None,
+    ))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/me/providers/telegram", status_code=200)
+async def link_telegram(
+    data: TelegramOAuthRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    bot_token = await get_setting(db, "telegram_bot_token")
+    if not bot_token:
+        raise HTTPException(status_code=503, detail="Telegram OAuth not configured")
+    try:
+        raw = data.model_dump(exclude_none=True)
+        verify_telegram_data(raw, bot_token=bot_token)
+        tg_user = parse_telegram_user(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await _check_provider_not_taken(db, ProviderType.telegram, str(tg_user.id))
+    db.add(AuthProvider(
+        user_id=current_user.id,
+        provider=ProviderType.telegram,
+        provider_user_id=str(tg_user.id),
+        provider_username=tg_user.username,
+    ))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/me/providers/email", status_code=200)
+async def link_email(
+    data: LinkEmailRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(
+        select(AuthProvider).where(
+            AuthProvider.provider == ProviderType.email,
+            AuthProvider.provider_user_id == data.email.lower(),
+        )
+    )
+    if result.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Email уже используется")
+    db.add(AuthProvider(
+        user_id=current_user.id,
+        provider=ProviderType.email,
+        provider_user_id=data.email.lower(),
+        password_hash=hash_password(data.password),
+    ))
+    await db.commit()
+    return {"ok": True}
