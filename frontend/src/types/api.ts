@@ -283,3 +283,35 @@ export interface SupportMessageAdminItem {
 
 // Note: support-messages endpoint returns a plain list (no pagination wrapper).
 // Use ?skip=N&limit=50 params.
+
+// ─── Plan 11 types ───────────────────────────────────────────────────────────
+
+export interface OAuthConfigResponse {
+  google: boolean
+  vk: boolean
+  telegram: boolean
+  telegram_bot_username: string | null
+}
+
+export interface OsAppConfig {
+  app_name: string
+  store_url: string
+}
+
+export interface InstallAppConfig {
+  android: OsAppConfig
+  ios: OsAppConfig
+  windows: OsAppConfig
+  macos: OsAppConfig
+  linux: OsAppConfig
+}
+
+export interface PlanAdminCreateRequest {
+  name: string
+  label: string
+  duration_days: number
+  price_rub: number
+  new_user_price_rub?: number | null
+  is_active?: boolean
+  sort_order?: number
+}
