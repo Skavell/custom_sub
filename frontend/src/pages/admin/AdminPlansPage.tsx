@@ -1,9 +1,125 @@
 // frontend/src/pages/admin/AdminPlansPage.tsx
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Pencil, X, Check } from 'lucide-react'
+import { Pencil, X, Check, Plus } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
-import type { PlanAdminItem, PlanAdminUpdateRequest } from '@/types/api'
+import type { PlanAdminItem, PlanAdminUpdateRequest, PlanAdminCreateRequest } from '@/types/api'
+
+function CreatePlanForm({ onCreated }: { onCreated: () => void }) {
+  const queryClient = useQueryClient()
+  const [form, setForm] = useState<PlanAdminCreateRequest>({
+    name: '',
+    label: '',
+    duration_days: 30,
+    price_rub: 0,
+    is_active: true,
+    sort_order: 0,
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  const mutation = useMutation({
+    mutationFn: (data: PlanAdminCreateRequest) =>
+      api.post<PlanAdminItem>('/api/admin/plans', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-plans'] })
+      onCreated()
+      setError(null)
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.detail : 'Ошибка создания'),
+  })
+
+  return (
+    <div className="rounded-input bg-surface border border-accent/30 px-4 py-3 mb-4">
+      <p className="text-xs font-semibold text-text-muted mb-3 uppercase tracking-wider">Новый тариф</p>
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <label className="flex flex-col gap-1 col-span-2">
+          <span className="text-xs text-text-muted">Системное имя (уникальное, напр. 2_months)</span>
+          <input
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            placeholder="2_months"
+            className="rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-text-muted">Метка</span>
+          <input
+            value={form.label}
+            onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+            placeholder="2 месяца"
+            className="rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-text-muted">Дней</span>
+          <input
+            type="number"
+            value={form.duration_days}
+            onChange={(e) => setForm((f) => ({ ...f, duration_days: Number(e.target.value) }))}
+            className="rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-text-muted">Цена (₽)</span>
+          <input
+            type="number"
+            value={form.price_rub}
+            onChange={(e) => setForm((f) => ({ ...f, price_rub: Number(e.target.value) }))}
+            className="rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-text-muted">Цена новому (₽, необяз.)</span>
+          <input
+            type="number"
+            value={form.new_user_price_rub ?? ''}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                new_user_price_rub: e.target.value === '' ? undefined : Number(e.target.value),
+              }))
+            }
+            className="rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-text-muted">Порядок сортировки</span>
+          <input
+            type="number"
+            value={form.sort_order ?? 0}
+            onChange={(e) => setForm((f) => ({ ...f, sort_order: Number(e.target.value) }))}
+            className="rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent"
+          />
+        </label>
+      </div>
+      <label className="flex items-center gap-2 mb-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={form.is_active ?? true}
+          onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))}
+          className="rounded accent-cyan-500"
+        />
+        <span className="text-sm text-text-secondary">Активен</span>
+      </label>
+      {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          onClick={() => mutation.mutate(form)}
+          disabled={mutation.isPending || !form.name || !form.label}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-input bg-accent text-background text-xs font-medium disabled:opacity-50"
+        >
+          <Check size={13} /> Создать
+        </button>
+        <button
+          onClick={onCreated}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-input bg-white/5 text-text-secondary text-xs"
+        >
+          <X size={13} /> Отмена
+        </button>
+      </div>
+    </div>
+  )
+}
 
 function PlanRow({ plan }: { plan: PlanAdminItem }) {
   const queryClient = useQueryClient()
@@ -135,6 +251,7 @@ function PlanRow({ plan }: { plan: PlanAdminItem }) {
 }
 
 export default function AdminPlansPage() {
+  const [showCreate, setShowCreate] = useState(false)
   const { data: plans, isLoading, error } = useQuery<PlanAdminItem[]>({
     queryKey: ['admin-plans'],
     queryFn: () => api.get<PlanAdminItem[]>('/api/admin/plans'),
@@ -143,7 +260,17 @@ export default function AdminPlansPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-2xl mx-auto">
-      <h1 className="text-xl font-bold text-text-primary mb-5">Тарифы</h1>
+      <div className="flex items-center justify-between mb-5">
+        <h1 className="text-xl font-bold text-text-primary">Тарифы</h1>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-input bg-accent text-background text-xs font-medium"
+        >
+          <Plus size={13} /> Добавить
+        </button>
+      </div>
+
+      {showCreate && <CreatePlanForm onCreated={() => setShowCreate(false)} />}
 
       {isLoading && (
         <div className="flex justify-center py-12">
