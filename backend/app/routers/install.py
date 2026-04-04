@@ -11,7 +11,7 @@ from app.deps import get_current_user
 from app.models.subscription import SubscriptionStatus
 from app.models.user import User
 from app.redis_client import get_redis
-from app.schemas.install import SubscriptionLinkResponse
+from app.schemas.install import SubscriptionLinkResponse, OsAppConfigResponse, InstallAppConfigResponse
 from app.services.remnawave_client import RemnawaveClient
 from app.services.setting_service import get_setting, get_setting_decrypted
 from app.services.subscription_service import get_user_subscription
@@ -20,6 +20,42 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/install", tags=["install"])
 
 _SUB_URL_TTL = 3600  # 1 hour
+
+_INSTALL_DEFAULTS: dict[str, dict[str, str]] = {
+    "android": {
+        "app_name": "FlClash",
+        "store_url": "https://github.com/chen08209/FlClash/releases/latest",
+    },
+    "ios": {
+        "app_name": "Clash Mi",
+        "store_url": "https://apps.apple.com/app/clash-mi/id1574653991",
+    },
+    "windows": {
+        "app_name": "FlClash",
+        "store_url": "https://github.com/chen08209/FlClash/releases/latest",
+    },
+    "macos": {
+        "app_name": "FlClash",
+        "store_url": "https://github.com/chen08209/FlClash/releases/latest",
+    },
+    "linux": {
+        "app_name": "FlClash",
+        "store_url": "https://github.com/chen08209/FlClash/releases/latest",
+    },
+}
+
+
+@router.get("/app-config", response_model=InstallAppConfigResponse)
+async def get_app_config(
+    db: AsyncSession = Depends(get_db),
+) -> InstallAppConfigResponse:
+    """Public endpoint — per-OS install app config with DB overrides."""
+    result: dict[str, dict[str, str]] = {}
+    for os_key, defaults in _INSTALL_DEFAULTS.items():
+        app_name = await get_setting(db, f"install_{os_key}_app_name") or defaults["app_name"]
+        store_url = await get_setting(db, f"install_{os_key}_store_url") or defaults["store_url"]
+        result[os_key] = {"app_name": app_name, "store_url": store_url}
+    return InstallAppConfigResponse(**result)
 
 
 @router.get("/subscription-link", response_model=SubscriptionLinkResponse)
