@@ -84,10 +84,6 @@ export default function SubscriptionPage() {
   const [promoError, setPromoError] = useState<string | null>(null)
   const [promoValidating, setPromoValidating] = useState(false)
 
-  const [bonusPromoInput, setBonusPromoInput] = useState('')
-  const [bonusResult, setBonusResult] = useState<string | null>(null)
-  const [bonusError, setBonusError] = useState<string | null>(null)
-
   const selectedPlan = plans.find((p) => p.id === selectedPlanId) ?? null
   const isNewUser = sub === null || sub === undefined
 
@@ -147,15 +143,6 @@ export default function SubscriptionPage() {
   const applyBonusMutation = useMutation({
     mutationFn: (req: ApplyPromoRequest) =>
       api.post('/api/promo-codes/apply', req),
-    onSuccess: (data: unknown) => {
-      const d = data as { days_added: number; new_expires_at: string }
-      setBonusResult(`Готово! Добавлено ${d.days_added} дней. Новый срок: ${formatDate(d.new_expires_at)}`)
-      setBonusError(null)
-      setBonusPromoInput('')
-    },
-    onError: (e) => {
-      setBonusError(e instanceof ApiError ? e.detail : 'Ошибка применения промокода')
-    },
   })
 
   function handlePay() {
@@ -201,7 +188,7 @@ export default function SubscriptionPage() {
         ))}
       </div>
 
-      {/* Promo code */}
+      {/* Promo code — single unified field */}
       <div className="rounded-card bg-surface border border-border-neutral p-4 mb-4">
         <p className="text-sm font-medium text-text-primary mb-3 flex items-center gap-2">
           <Tag size={14} className="text-accent" /> Промокод
@@ -222,16 +209,40 @@ export default function SubscriptionPage() {
             disabled={promoValidating || !promoInput.trim()}
             className="rounded-input bg-accent/10 hover:bg-accent/20 text-accent px-4 text-sm font-medium transition-colors disabled:opacity-50"
           >
-            {promoValidating ? <Loader2 size={14} className="animate-spin" /> : 'Проверить'}
+            {promoValidating ? <Loader2 size={14} className="animate-spin" /> : 'Применить'}
           </button>
         </div>
         {promoError && <p className="mt-2 text-xs text-red-400">{promoError}</p>}
         {validatedPromo && (
-          <p className="mt-2 text-xs text-emerald-400">
-            {validatedPromo.type === 'discount_percent'
-              ? `Скидка ${validatedPromo.value}% применена`
-              : `Бонус ${validatedPromo.value} дней после оплаты`}
-          </p>
+          <div className="mt-2">
+            <p className="text-xs text-emerald-400">
+              {validatedPromo.type === 'discount_percent'
+                ? `Скидка ${validatedPromo.value}% — выберите тариф для оплаты`
+                : `Бонус ${validatedPromo.value} дн. — выберите тариф или активируйте без оплаты`}
+            </p>
+            {validatedPromo.type === 'bonus_days' && !selectedPlanId && (
+              <button
+                onClick={() => applyBonusMutation.mutate({ code: validatedPromo.code })}
+                disabled={applyBonusMutation.isPending}
+                className="mt-2 rounded-input bg-white/5 hover:bg-white/10 text-text-secondary px-4 py-1.5 text-xs transition-colors disabled:opacity-50"
+              >
+                {applyBonusMutation.isPending ? <Loader2 size={13} className="animate-spin inline" /> : 'Активировать без оплаты'}
+              </button>
+            )}
+            {applyBonusMutation.isSuccess && (
+              <p className="mt-1 text-xs text-emerald-400">
+                {(() => {
+                  const d = applyBonusMutation.data as { days_added: number; new_expires_at: string }
+                  return `Готово! +${d.days_added} дн. Новый срок: ${formatDate(d.new_expires_at)}`
+                })()}
+              </p>
+            )}
+            {applyBonusMutation.isError && (
+              <p className="mt-1 text-xs text-red-400">
+                {applyBonusMutation.error instanceof ApiError ? applyBonusMutation.error.detail : 'Ошибка'}
+              </p>
+            )}
+          </div>
         )}
       </div>
 
@@ -287,32 +298,6 @@ export default function SubscriptionPage() {
         </div>
       )}
 
-      {/* Standalone bonus apply */}
-      <div className="rounded-card bg-surface border border-border-neutral p-4">
-        <p className="text-sm font-medium text-text-primary mb-1">Активировать промокод без оплаты</p>
-        <p className="text-xs text-text-muted mb-3">Только для промокодов типа «бонусные дни»</p>
-        <div className="flex gap-2">
-          <input
-            value={bonusPromoInput}
-            onChange={(e) => {
-              setBonusPromoInput(e.target.value.toUpperCase())
-              setBonusResult(null)
-              setBonusError(null)
-            }}
-            placeholder="BONUS2025"
-            className="flex-1 rounded-input bg-white/5 border border-border-neutral px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60"
-          />
-          <button
-            onClick={() => applyBonusMutation.mutate({ code: bonusPromoInput.trim() })}
-            disabled={applyBonusMutation.isPending || !bonusPromoInput.trim()}
-            className="rounded-input bg-white/5 hover:bg-white/10 text-text-secondary px-4 text-sm transition-colors disabled:opacity-50"
-          >
-            {applyBonusMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : 'Применить'}
-          </button>
-        </div>
-        {bonusError && <p className="mt-2 text-xs text-red-400">{bonusError}</p>}
-        {bonusResult && <p className="mt-2 text-xs text-emerald-400">{bonusResult}</p>}
-      </div>
     </div>
   )
 }
