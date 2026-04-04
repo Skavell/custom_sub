@@ -7,7 +7,7 @@ from sqlalchemy import select as _select
 
 from app.database import get_db
 from app.redis_client import get_redis
-from app.schemas.auth import EmailRegisterRequest, EmailLoginRequest, TokenResponse, TelegramOAuthRequest, GoogleOAuthRequest, VKOAuthRequest
+from app.schemas.auth import EmailRegisterRequest, EmailLoginRequest, TokenResponse, TelegramOAuthRequest, GoogleOAuthRequest, VKOAuthRequest, OAuthConfigResponse
 from app.services.auth.jwt_service import create_access_token, create_refresh_token, verify_token, TokenType
 from app.services.auth.password_service import verify_password
 from app.services.user_service import create_user_with_provider, get_user_by_email, get_user_by_provider
@@ -68,6 +68,26 @@ async def _set_auth_cookies(response: Response, user_id: str, redis: Redis) -> N
     )
     response.set_cookie("access_token", access, max_age=settings.access_token_expire_minutes * 60, **COOKIE_OPTS)
     response.set_cookie("refresh_token", refresh, max_age=settings.refresh_token_expire_days * 86400, **COOKIE_OPTS)
+
+
+@router.get("/oauth-config", response_model=OAuthConfigResponse)
+async def get_oauth_config(
+    db: AsyncSession = Depends(get_db),
+) -> OAuthConfigResponse:
+    """Public endpoint — returns which OAuth providers are configured."""
+    google_enabled = bool(settings.google_client_id)
+    vk_enabled = bool(settings.vk_client_id)
+    telegram_token = await get_setting(db, "telegram_bot_token")
+    telegram_enabled = bool(telegram_token)
+    bot_username: str | None = None
+    if telegram_enabled:
+        bot_username = await get_setting(db, "telegram_bot_username") or None
+    return OAuthConfigResponse(
+        google=google_enabled,
+        vk=vk_enabled,
+        telegram=telegram_enabled,
+        telegram_bot_username=bot_username,
+    )
 
 
 @router.post("/register", response_model=TokenResponse)

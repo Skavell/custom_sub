@@ -53,3 +53,10 @@ class VKOAuthRequest(BaseModel):
     redirect_uri: str
     device_id: str
     state: str
+
+
+class OAuthConfigResponse(BaseModel):
+    google: bool
+    vk: bool
+    telegram: bool
+    telegram_bot_username: str | None
