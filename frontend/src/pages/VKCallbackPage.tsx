@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, ApiError } from '@/lib/api'
 
-export default function GoogleCallbackPage() {
+export default function VKCallbackPage() {
   const navigate = useNavigate()
   const called = useRef(false)
 
@@ -19,20 +19,26 @@ export default function GoogleCallbackPage() {
       return
     }
 
+    const redirectUri = `${window.location.origin}/auth/vk/callback`
+    const deviceId = localStorage.getItem('vk_device_id') ?? ''
+    const state = localStorage.getItem('vk_state') ?? ''
     const intent = localStorage.getItem('oauth_intent')
+
+    localStorage.removeItem('vk_device_id')
+    localStorage.removeItem('vk_state')
     localStorage.removeItem('oauth_intent')
 
-    const redirectUri = `${window.location.origin}/auth/google/callback`
+    const payload = { code, redirect_uri: redirectUri, device_id: deviceId, state }
     const endpoint = intent === 'link'
-      ? '/api/users/me/providers/google'
-      : '/api/auth/oauth/google'
+      ? '/api/users/me/providers/vk'
+      : '/api/auth/oauth/vk'
     const successPath = intent === 'link' ? '/profile' : '/'
 
     api
-      .post(endpoint, { code, redirect_uri: redirectUri })
+      .post(endpoint, payload)
       .then(() => navigate(successPath, { replace: true }))
       .catch((e) => {
-        console.error('Google OAuth failed', e instanceof ApiError ? e.detail : e)
+        console.error('VK OAuth failed', e instanceof ApiError ? e.detail : e)
         navigate(intent === 'link' ? '/profile' : '/login', { replace: true })
       })
   }, [navigate])
