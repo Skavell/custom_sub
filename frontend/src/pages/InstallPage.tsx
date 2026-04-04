@@ -5,7 +5,7 @@ import { Smartphone, Monitor, Download, Terminal, ExternalLink, Copy, Check } fr
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
-import type { InstallLinkResponse } from '@/types/api'
+import type { InstallLinkResponse, InstallAppConfig } from '@/types/api'
 
 type OS = 'android' | 'ios' | 'windows' | 'macos' | 'linux'
 
@@ -26,68 +26,56 @@ const OS_TABS: { id: OS; label: string; icon: React.ComponentType<{ size?: strin
   { id: 'linux', label: 'Linux', icon: Terminal },
 ]
 
-interface AppInfo {
-  name: string
-  deepLinkTemplate: (sub: string, name: string) => string
-  storeUrl: string
-  steps: string[]
+// Deep link templates per app key (technical, not configurable)
+const DEEP_LINK_TEMPLATES: Record<string, (sub: string, name: string) => string> = {
+  flclash: (sub) => `flclash://install-config?url=${encodeURIComponent(sub)}`,
+  clash_mi: (sub, name) =>
+    `clash://install-config?overwrite=no&name=${encodeURIComponent(name)}&url=${encodeURIComponent(sub)}`,
+  clash_meta: (sub, name) =>
+    `clashmeta://install-config?name=${encodeURIComponent(name)}&url=${encodeURIComponent(sub)}`,
 }
 
-const APPS: Record<string, AppInfo> = {
-  flclash: {
-    name: 'FlClash',
-    deepLinkTemplate: (sub) => `flclash://install-config?url=${encodeURIComponent(sub)}`,
-    storeUrl: 'https://github.com/chen08209/FlClash/releases/latest',
-    steps: [
-      'Установите FlClash',
-      'Нажмите кнопку ниже для автоматической настройки',
-      'Разрешите добавление профиля в приложении',
-      'Включите туннель',
-    ],
-  },
-  clash_mi: {
-    name: 'Clash Mi',
-    deepLinkTemplate: (sub, name) =>
-      `clash://install-config?overwrite=no&name=${encodeURIComponent(name)}&url=${encodeURIComponent(sub)}`,
-    storeUrl: 'https://apps.apple.com/app/clash-mi/id1574653991',
-    steps: [
-      'Установите Clash Mi из App Store',
-      'Нажмите кнопку ниже для автоматической настройки',
-      'Подтвердите добавление VPN-профиля',
-      'Включите туннель',
-    ],
-  },
-  clash_meta: {
-    name: 'Clash Meta',
-    deepLinkTemplate: (sub, name) =>
-      `clashmeta://install-config?name=${encodeURIComponent(name)}&url=${encodeURIComponent(sub)}`,
-    storeUrl: 'https://github.com/MetaCubeX/ClashMetaForAndroid/releases/latest',
-    steps: [
-      'Установите Clash Meta',
-      'Нажмите кнопку ниже для автоматической настройки',
-      'Разрешите добавление профиля',
-      'Включите туннель',
-    ],
-  },
-  clash_verge: {
-    name: 'Clash Verge Rev',
-    deepLinkTemplate: (sub) => `clash://install-config?url=${encodeURIComponent(sub)}`,
-    storeUrl: 'https://github.com/clash-verge-rev/clash-verge-rev/releases/latest',
-    steps: [
-      'Установите Clash Verge Rev',
-      'Нажмите кнопку ниже для автоматической настройки',
-      'Подтвердите импорт профиля',
-      'Включите системный прокси',
-    ],
-  },
+// Steps per OS (generic)
+const OS_STEPS: Record<OS, string[]> = {
+  android: [
+    'Установите приложение',
+    'Нажмите кнопку ниже для автоматической настройки',
+    'Разрешите добавление профиля в приложении',
+    'Включите туннель',
+  ],
+  ios: [
+    'Установите приложение из App Store',
+    'Нажмите кнопку ниже для автоматической настройки',
+    'Подтвердите добавление VPN-профиля',
+    'Включите туннель',
+  ],
+  windows: [
+    'Установите приложение',
+    'Нажмите кнопку ниже для автоматической настройки',
+    'Разрешите добавление профиля',
+    'Включите туннель',
+  ],
+  macos: [
+    'Установите приложение',
+    'Нажмите кнопку ниже для автоматической настройки',
+    'Разрешите добавление профиля',
+    'Включите туннель',
+  ],
+  linux: [
+    'Установите приложение',
+    'Нажмите кнопку ниже для автоматической настройки',
+    'Разрешите добавление профиля',
+    'Включите туннель',
+  ],
 }
 
-const OS_APPS: Record<OS, string[]> = {
-  android: ['flclash', 'clash_meta'],
-  ios: ['clash_mi'],
-  windows: ['clash_verge', 'flclash'],
-  macos: ['flclash', 'clash_verge'],
-  linux: ['clash_verge'],
+// App key per OS for deep link (which deep link template to use)
+const OS_APP_KEY: Record<OS, string> = {
+  android: 'flclash',
+  ios: 'clash_mi',
+  windows: 'flclash',
+  macos: 'flclash',
+  linux: 'flclash',
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -112,7 +100,6 @@ function CopyButton({ text }: { text: string }) {
 export default function InstallPage() {
   const { user } = useAuth()
   const [activeOS, setActiveOS] = useState<OS>(detectOS)
-  const [activeApp, setActiveApp] = useState<string | null>(null)
 
   const { data: installData, isLoading, error } = useQuery<InstallLinkResponse>({
     queryKey: ['subscriptionLink'],
@@ -121,17 +108,22 @@ export default function InstallPage() {
     staleTime: 60_000,
   })
 
-  const is403 = error instanceof ApiError && error.status === 403
-  const appsForOS = OS_APPS[activeOS]
-  const currentAppKey = activeApp ?? appsForOS[0]
-  const app = APPS[currentAppKey]
-  const subLink = installData?.subscription_url ?? ''
-  const displayName = user?.display_name ?? 'Skavellion'
+  const { data: appConfig } = useQuery<InstallAppConfig>({
+    queryKey: ['installAppConfig'],
+    queryFn: () => api.get<InstallAppConfig>('/api/install/app-config'),
+    staleTime: 10 * 60_000,
+  })
 
-  function handleOSChange(os: OS) {
-    setActiveOS(os)
-    setActiveApp(null)
-  }
+  const is403 = error instanceof ApiError && error.status === 403
+  const subLink = installData?.subscription_url ?? ''
+  const displayName = user?.display_name ?? 'VPN'
+
+  const osConfig = appConfig?.[activeOS]
+  const appName = osConfig?.app_name ?? '…'
+  const storeUrl = osConfig?.store_url ?? '#'
+  const deepLinkFn = DEEP_LINK_TEMPLATES[OS_APP_KEY[activeOS]]
+  const deepLink = subLink && deepLinkFn ? deepLinkFn(subLink, displayName) : null
+  const steps = OS_STEPS[activeOS]
 
   return (
     <div className="p-4 md:p-6 max-w-2xl mx-auto">
@@ -162,12 +154,10 @@ export default function InstallPage() {
         {OS_TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => handleOSChange(id)}
+            onClick={() => setActiveOS(id)}
             className={cn(
               'flex items-center gap-1.5 rounded-input px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors',
-              activeOS === id
-                ? 'bg-accent/15 text-accent'
-                : 'text-text-muted hover:text-text-secondary',
+              activeOS === id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-secondary',
             )}
           >
             <Icon size={13} />
@@ -176,31 +166,11 @@ export default function InstallPage() {
         ))}
       </div>
 
-      {/* App selector */}
-      {appsForOS.length > 1 && (
-        <div className="flex gap-2 mb-5">
-          {appsForOS.map((key) => (
-            <button
-              key={key}
-              onClick={() => setActiveApp(key)}
-              className={cn(
-                'rounded-input border px-3 py-1.5 text-xs font-medium transition-colors',
-                currentAppKey === key
-                  ? 'border-accent text-accent bg-accent/10'
-                  : 'border-border-neutral text-text-secondary hover:border-accent/40',
-              )}
-            >
-              {APPS[key].name}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* Install steps */}
       <div className="rounded-card bg-surface border border-border-neutral p-5 mb-4">
-        <h2 className="text-base font-semibold text-text-primary mb-4">{app.name}</h2>
+        <h2 className="text-base font-semibold text-text-primary mb-4">{appName}</h2>
         <ol className="space-y-4">
-          {app.steps.map((step, i) => (
+          {steps.map((step, i) => (
             <li key={i} className="flex gap-3">
               <span className="h-6 w-6 rounded-full bg-accent/15 text-accent text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
                 {i + 1}
@@ -211,14 +181,25 @@ export default function InstallPage() {
         </ol>
       </div>
 
-      {/* Deep link button */}
-      {subLink && (
+      {/* Download button — always visible */}
+      <a
+        href={storeUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center justify-center gap-2 w-full text-center rounded-input border border-border-neutral bg-surface hover:border-accent/40 text-text-secondary font-medium py-2.5 text-sm transition-colors mb-3"
+      >
+        <Download size={14} />
+        Скачать {appName}
+      </a>
+
+      {/* Deep link button — only when subscription is active */}
+      {deepLink && (
         <a
-          href={app.deepLinkTemplate(subLink, displayName)}
+          href={deepLink}
           className="flex items-center justify-center gap-2 w-full text-center rounded-input bg-accent hover:bg-accent-hover text-white font-medium py-3 text-sm transition-colors mb-4"
         >
           <ExternalLink size={14} />
-          Открыть в {app.name}
+          Установить подписку в {appName}
         </a>
       )}
 
@@ -230,22 +211,6 @@ export default function InstallPage() {
             <code className="flex-1 text-xs text-text-secondary break-all">{subLink}</code>
             <CopyButton text={subLink} />
           </div>
-        </div>
-      )}
-
-      {/* Download link for app */}
-      {!subLink && !isLoading && !is403 && (
-        <div className="rounded-card bg-surface border border-border-neutral p-4">
-          <p className="text-xs text-text-muted mb-2">Скачать {app.name}:</p>
-          <a
-            href={app.storeUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 text-sm text-accent hover:underline"
-          >
-            <Download size={14} />
-            {app.storeUrl}
-          </a>
         </div>
       )}
     </div>
