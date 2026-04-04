@@ -5,6 +5,7 @@ Revises: 1e776950ed0d
 Create Date: 2026-04-04 00:00:00.000000
 
 """
+import json
 from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
@@ -46,7 +47,7 @@ def upgrade() -> None:
                 "VALUES (:key, :value, :is_sensitive) "
                 "ON CONFLICT (key) DO NOTHING"
             ),
-            {"key": key, "value": value, "is_sensitive": is_sensitive},
+            {"key": key, "value": json.dumps({"value": value}), "is_sensitive": is_sensitive},
         )
 
 
