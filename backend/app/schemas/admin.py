@@ -99,6 +99,16 @@ class PlanUpdateRequest(BaseModel):
     is_active: bool | None = None
 
 
+class PlanCreateRequest(BaseModel):
+    name: str                          # unique system key e.g. "2_months"
+    label: str                         # display name e.g. "2 месяца"
+    duration_days: int
+    price_rub: int
+    new_user_price_rub: int | None = None
+    is_active: bool = True
+    sort_order: int = 0
+
+
 # --- Promo Codes ---
 
 class PromoCodeAdminItem(BaseModel):

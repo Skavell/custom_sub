@@ -31,6 +31,7 @@ from app.schemas.admin import (
     ArticleUpdateRequest,
     ConflictResolveRequest,
     PlanAdminItem,
+    PlanCreateRequest,
     PlanUpdateRequest,
     PromoCodeAdminItem,
     PromoCodeCreateRequest,
@@ -268,6 +269,32 @@ async def admin_update_plan(
     if data.is_active is not None:
         plan.is_active = data.is_active
     await db.commit()
+    return PlanAdminItem.model_validate(plan)
+
+
+@router.post("/plans", response_model=PlanAdminItem, status_code=201)
+async def admin_create_plan(
+    data: PlanCreateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> PlanAdminItem:
+    plan = Plan(
+        name=data.name,
+        label=data.label,
+        duration_days=data.duration_days,
+        price_rub=data.price_rub,
+        new_user_price_rub=data.new_user_price_rub,
+        is_active=data.is_active,
+        sort_order=data.sort_order,
+    )
+    db.add(plan)
+    try:
+        await db.flush()
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Тариф с таким именем уже существует")
+    await db.refresh(plan)
     return PlanAdminItem.model_validate(plan)
 
 
