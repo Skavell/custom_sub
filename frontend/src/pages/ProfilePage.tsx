@@ -1,9 +1,11 @@
-import { useQueryClient, useMutation } from '@tanstack/react-query'
-import { User, Trash2, Clock, Loader2, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query'
+import { User, Trash2, Clock, Loader2, CheckCircle, XCircle, AlertCircle, Plus } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useTransactions } from '@/hooks/useTransactions'
 import { api, ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import type { OAuthConfigResponse } from '@/types/api'
 
 const PROVIDER_LABELS: Record<string, string> = {
   telegram: 'Telegram',
@@ -40,6 +42,39 @@ function formatDate(iso: string) {
   })
 }
 
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
+const VK_CLIENT_ID = import.meta.env.VITE_VK_CLIENT_ID as string | undefined
+
+function startGoogleLink() {
+  if (!GOOGLE_CLIENT_ID) return
+  localStorage.setItem('oauth_intent', 'link')
+  const redirectUri = `${window.location.origin}/auth/google/callback`
+  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
+  url.searchParams.set('client_id', GOOGLE_CLIENT_ID)
+  url.searchParams.set('redirect_uri', redirectUri)
+  url.searchParams.set('response_type', 'code')
+  url.searchParams.set('scope', 'openid email profile')
+  window.location.href = url.toString()
+}
+
+function startVKLink() {
+  if (!VK_CLIENT_ID) return
+  const deviceId = crypto.randomUUID()
+  const state = crypto.randomUUID()
+  localStorage.setItem('vk_device_id', deviceId)
+  localStorage.setItem('vk_state', state)
+  localStorage.setItem('oauth_intent', 'link')
+  const redirectUri = `${window.location.origin}/auth/vk/callback`
+  const url = new URL('https://id.vk.com/authorize')
+  url.searchParams.set('response_type', 'code')
+  url.searchParams.set('client_id', VK_CLIENT_ID)
+  url.searchParams.set('redirect_uri', redirectUri)
+  url.searchParams.set('state', state)
+  url.searchParams.set('device_id', deviceId)
+  url.searchParams.set('scope', 'email')
+  window.location.href = url.toString()
+}
+
 export default function ProfilePage() {
   const queryClient = useQueryClient()
   const { user, isLoading: authLoading } = useAuth()
@@ -52,6 +87,63 @@ export default function ProfilePage() {
       queryClient.invalidateQueries({ queryKey: ['me'] })
     },
   })
+
+  const { data: oauthConfig } = useQuery<OAuthConfigResponse>({
+    queryKey: ['oauth-config'],
+    queryFn: () => api.get<OAuthConfigResponse>('/api/auth/oauth-config'),
+    staleTime: 5 * 60_000,
+  })
+
+  const [showEmailForm, setShowEmailForm] = useState(false)
+  const [linkEmail, setLinkEmail] = useState('')
+  const [linkPassword, setLinkPassword] = useState('')
+  const [linkEmailError, setLinkEmailError] = useState<string | null>(null)
+  const [linkTelegramError, setLinkTelegramError] = useState<string | null>(null)
+
+  const linkEmailMutation = useMutation({
+    mutationFn: ({ email, password }: { email: string; password: string }) =>
+      api.post('/api/users/me/providers/email', { email, password }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['me'] })
+      setShowEmailForm(false)
+      setLinkEmail('')
+      setLinkPassword('')
+      setLinkEmailError(null)
+    },
+    onError: (e) => setLinkEmailError(e instanceof ApiError ? e.detail : 'Ошибка'),
+  })
+
+  const telegramLinkRef = useRef<HTMLDivElement>(null)
+
+  const linkedTypes = new Set(user?.providers.map((p) => p.type) ?? [])
+
+  const canAddGoogle = oauthConfig?.google && !!GOOGLE_CLIENT_ID && !linkedTypes.has('google')
+  const canAddVK = oauthConfig?.vk && !!VK_CLIENT_ID && !linkedTypes.has('vk')
+  const canAddTelegram = oauthConfig?.telegram && !!oauthConfig.telegram_bot_username && !linkedTypes.has('telegram')
+  const canAddEmail = !linkedTypes.has('email')
+  const hasAddable = canAddGoogle || canAddVK || canAddTelegram || canAddEmail
+
+  useEffect(() => {
+    if (!canAddTelegram || !oauthConfig?.telegram_bot_username || !telegramLinkRef.current) return
+    ;(window as Record<string, unknown>).__onTelegramLink = async (tgUser: Record<string, unknown>) => {
+      try {
+        await api.post('/api/users/me/providers/telegram', tgUser)
+        queryClient.invalidateQueries({ queryKey: ['me'] })
+        setLinkTelegramError(null)
+      } catch (e) {
+        setLinkTelegramError(e instanceof ApiError ? e.detail : 'Ошибка Telegram')
+      }
+    }
+    const script = document.createElement('script')
+    script.src = 'https://telegram.org/js/telegram-widget.js?22'
+    script.setAttribute('data-telegram-login', oauthConfig.telegram_bot_username)
+    script.setAttribute('data-size', 'medium')
+    script.setAttribute('data-onauth', '__onTelegramLink(user)')
+    script.setAttribute('data-request-access', 'write')
+    script.async = true
+    telegramLinkRef.current.appendChild(script)
+    return () => { delete (window as Record<string, unknown>).__onTelegramLink }
+  }, [canAddTelegram, oauthConfig?.telegram_bot_username])
 
   if (authLoading) {
     return (
@@ -145,6 +237,82 @@ export default function ProfilePage() {
           </p>
         )}
       </div>
+
+      {/* Add auth method */}
+      {hasAddable && (
+        <div className="rounded-card bg-surface border border-border-neutral p-5 mb-4">
+          <h2 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+            <Plus size={14} className="text-accent" /> Добавить способ входа
+          </h2>
+          <div className="flex flex-col gap-2">
+            {canAddGoogle && (
+              <button
+                onClick={startGoogleLink}
+                className="flex items-center gap-2.5 rounded-input bg-white/5 px-3 py-2.5 text-sm text-text-secondary hover:text-text-primary transition-colors text-left"
+              >
+                Google
+              </button>
+            )}
+            {canAddVK && (
+              <button
+                onClick={startVKLink}
+                className="flex items-center gap-2.5 rounded-input bg-white/5 px-3 py-2.5 text-sm text-text-secondary hover:text-text-primary transition-colors text-left"
+              >
+                ВКонтакте
+              </button>
+            )}
+            {canAddTelegram && (
+              <div>
+                <div ref={telegramLinkRef} />
+                {linkTelegramError && <p className="mt-1 text-xs text-red-400">{linkTelegramError}</p>}
+              </div>
+            )}
+            {canAddEmail && !showEmailForm && (
+              <button
+                onClick={() => setShowEmailForm(true)}
+                className="flex items-center gap-2.5 rounded-input bg-white/5 px-3 py-2.5 text-sm text-text-secondary hover:text-text-primary transition-colors text-left"
+              >
+                Email
+              </button>
+            )}
+            {canAddEmail && showEmailForm && (
+              <div className="space-y-2">
+                <input
+                  type="email"
+                  value={linkEmail}
+                  onChange={e => setLinkEmail(e.target.value)}
+                  placeholder="Email"
+                  className="w-full rounded-input bg-background border border-border-neutral px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                />
+                <input
+                  type="password"
+                  value={linkPassword}
+                  onChange={e => setLinkPassword(e.target.value)}
+                  placeholder="Пароль (мин. 8 символов)"
+                  minLength={8}
+                  className="w-full rounded-input bg-background border border-border-neutral px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                />
+                {linkEmailError && <p className="text-xs text-red-400">{linkEmailError}</p>}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => linkEmailMutation.mutate({ email: linkEmail, password: linkPassword })}
+                    disabled={linkEmailMutation.isPending || !linkEmail || !linkPassword}
+                    className="flex-1 py-1.5 rounded-input bg-accent text-background text-xs font-medium disabled:opacity-50"
+                  >
+                    {linkEmailMutation.isPending ? 'Сохранение…' : 'Добавить Email'}
+                  </button>
+                  <button
+                    onClick={() => { setShowEmailForm(false); setLinkEmailError(null) }}
+                    className="px-3 py-1.5 rounded-input bg-white/5 text-text-secondary text-xs"
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Transaction history */}
       <div className="rounded-card bg-surface border border-border-neutral p-5">
