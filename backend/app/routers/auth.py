@@ -87,11 +87,13 @@ async def get_oauth_config(
     bot_username: str | None = None
     if telegram_enabled:
         bot_username = await get_setting(db, "telegram_bot_username") or None
+    email_verification_required = await get_setting(db, "email_verification_enabled") == "true"
     return OAuthConfigResponse(
         google=google_enabled,
         vk=vk_enabled,
         telegram=telegram_enabled,
         telegram_bot_username=bot_username,
+        email_verification_required=email_verification_required,
     )
 
 

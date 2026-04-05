@@ -60,6 +60,7 @@ class OAuthConfigResponse(BaseModel):
     vk: bool
     telegram: bool
     telegram_bot_username: str | None
+    email_verification_required: bool = False
 
 
 class LinkEmailRequest(BaseModel):

@@ -13,3 +13,4 @@ class UserProfileResponse(BaseModel):
     is_admin: bool
     created_at: datetime
     providers: list[ProviderInfo]
+    email_verified: bool | None = None
