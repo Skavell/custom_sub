@@ -176,6 +176,9 @@ async def refresh(
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
+    if user.is_banned:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Аккаунт заблокирован")
+
     await _set_auth_cookies(response, str(user.id), redis)
     return TokenResponse(user_id=str(user.id), display_name=user.display_name)
 
