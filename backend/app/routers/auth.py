@@ -1,6 +1,7 @@
 import logging
 import uuid as _uuid
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
+from fastapi.responses import RedirectResponse
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select as _select
@@ -14,10 +15,14 @@ from app.services.user_service import create_user_with_provider, get_user_by_ema
 from app.models.auth_provider import ProviderType
 from app.models.user import User
 from app.config import settings
+from app.deps import get_current_user
 from app.services.auth.oauth.telegram import verify_telegram_data, parse_telegram_user
 from app.services.auth.oauth.google import exchange_google_code
 from app.services.auth.oauth.vk import exchange_vk_code
 from app.services.setting_service import get_setting, get_setting_decrypted
+from app.services.email_service import send_verification_email
+from app.services.rate_limiter import check_rate_limit
+from app.models.auth_provider import AuthProvider
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -285,3 +290,91 @@ async def oauth_vk(
 
     await _set_auth_cookies(response, str(user.id), redis)
     return TokenResponse(user_id=str(user.id), display_name=user.display_name)
+
+
+@router.post("/verify-email/send")
+async def send_verify_email(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    from sqlalchemy import select as _sel
+    result = await db.execute(
+        _sel(AuthProvider).where(
+            AuthProvider.user_id == current_user.id,
+            AuthProvider.provider == ProviderType.email,
+        )
+    )
+    email_provider = result.scalar_one_or_none()
+
+    # Already verified or no email provider
+    if email_provider is None or email_provider.email_verified:
+        return {"ok": True}
+
+    # Check resend API key
+    api_key = await get_setting_decrypted(db, "resend_api_key")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Email-сервис не настроен")
+
+    # Rate limit: 3 sends per hour per user
+    rate_key = f"verify_email_rate:{current_user.id}"
+    if not await check_rate_limit(redis, rate_key, 3, 3600):
+        raise HTTPException(status_code=429, detail="Слишком много попыток. Попробуйте через час.")
+
+    # Generate token and store in Redis
+    import uuid as _uuid2
+    token = str(_uuid2.uuid4())
+    await redis.setex(f"verify_email:{token}", 86400, str(current_user.id))
+
+    # Send email
+    from_address = await get_setting(db, "email_from_address") or "noreply@example.com"
+    from_name = await get_setting(db, "email_from_name") or "VPN Service"
+    frontend_url = settings.frontend_url.rstrip("/")
+    verify_url = f"{frontend_url}/verify-email?token={token}"
+
+    try:
+        await send_verification_email(
+            api_key=api_key,
+            from_address=from_address,
+            from_name=from_name,
+            to_email=email_provider.provider_user_id,
+            verify_url=verify_url,
+        )
+    except Exception as exc:
+        logger.exception("Failed to send verification email: %s", exc)
+        raise HTTPException(status_code=503, detail="Ошибка отправки письма")
+
+    return {"ok": True}
+
+
+@router.get("/verify-email/confirm")
+async def confirm_verify_email(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frontend_url = settings.frontend_url.rstrip("/")
+    user_id_str = await redis.get(f"verify_email:{token}")
+    if not user_id_str:
+        return RedirectResponse(url=f"{frontend_url}/verify-email?error=expired", status_code=302)
+
+    try:
+        import uuid as _uuid3
+        user_uuid = _uuid3.UUID(user_id_str if isinstance(user_id_str, str) else user_id_str.decode())
+    except ValueError:
+        return RedirectResponse(url=f"{frontend_url}/verify-email?error=expired", status_code=302)
+
+    from sqlalchemy import select as _sel2
+    result = await db.execute(
+        _sel2(AuthProvider).where(
+            AuthProvider.user_id == user_uuid,
+            AuthProvider.provider == ProviderType.email,
+        )
+    )
+    email_provider = result.scalar_one_or_none()
+    if email_provider:
+        email_provider.email_verified = True
+        await db.commit()
+
+    await redis.delete(f"verify_email:{token}")
+    return RedirectResponse(url=f"{frontend_url}/verify-email?verified=1", status_code=302)
