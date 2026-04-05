@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 import httpx
-from app.config import settings
 
 
 @dataclass
@@ -11,15 +10,15 @@ class VKUser:
     avatar: str | None
 
 
-async def exchange_vk_code(code: str, redirect_uri: str, device_id: str, state: str) -> VKUser:
+async def exchange_vk_code(code: str, redirect_uri: str, device_id: str, state: str, client_id: str, client_secret: str) -> VKUser:
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(
             "https://id.vk.com/oauth2/auth",
             data={
                 "grant_type": "authorization_code",
                 "code": code,
-                "client_id": settings.vk_client_id,
-                "client_secret": settings.vk_client_secret,
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "redirect_uri": redirect_uri,
                 "device_id": device_id,
                 "state": state,
@@ -30,7 +29,7 @@ async def exchange_vk_code(code: str, redirect_uri: str, device_id: str, state: 
 
         info_resp = await client.post(
             "https://id.vk.com/oauth2/user_info",
-            data={"access_token": token_data["access_token"], "client_id": settings.vk_client_id},
+            data={"access_token": token_data["access_token"], "client_id": client_id},
         )
         info_resp.raise_for_status()
         user = info_resp.json()["user"]

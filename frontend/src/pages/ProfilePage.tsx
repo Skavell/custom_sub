@@ -42,23 +42,18 @@ function formatDate(iso: string) {
   })
 }
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
-const VK_CLIENT_ID = import.meta.env.VITE_VK_CLIENT_ID as string | undefined
-
-function startGoogleLink() {
-  if (!GOOGLE_CLIENT_ID) return
+function startGoogleLink(clientId: string) {
   localStorage.setItem('oauth_intent', 'link')
   const redirectUri = `${window.location.origin}/auth/google/callback`
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
-  url.searchParams.set('client_id', GOOGLE_CLIENT_ID)
+  url.searchParams.set('client_id', clientId)
   url.searchParams.set('redirect_uri', redirectUri)
   url.searchParams.set('response_type', 'code')
   url.searchParams.set('scope', 'openid email profile')
   window.location.href = url.toString()
 }
 
-function startVKLink() {
-  if (!VK_CLIENT_ID) return
+function startVKLink(clientId: string) {
   const deviceId = crypto.randomUUID()
   const state = crypto.randomUUID()
   localStorage.setItem('vk_device_id', deviceId)
@@ -67,7 +62,7 @@ function startVKLink() {
   const redirectUri = `${window.location.origin}/auth/vk/callback`
   const url = new URL('https://id.vk.com/authorize')
   url.searchParams.set('response_type', 'code')
-  url.searchParams.set('client_id', VK_CLIENT_ID)
+  url.searchParams.set('client_id', clientId)
   url.searchParams.set('redirect_uri', redirectUri)
   url.searchParams.set('state', state)
   url.searchParams.set('device_id', deviceId)
@@ -117,10 +112,10 @@ export default function ProfilePage() {
 
   const linkedTypes = new Set(user?.providers.map((p) => p.type) ?? [])
 
-  const canAddGoogle = oauthConfig?.google && !!GOOGLE_CLIENT_ID && !linkedTypes.has('google')
-  const canAddVK = oauthConfig?.vk && !!VK_CLIENT_ID && !linkedTypes.has('vk')
+  const canAddGoogle = oauthConfig?.google && !!oauthConfig.google_client_id && !linkedTypes.has('google')
+  const canAddVK = oauthConfig?.vk && !!oauthConfig.vk_client_id && !linkedTypes.has('vk')
   const canAddTelegram = oauthConfig?.telegram && !!oauthConfig.telegram_bot_username && !linkedTypes.has('telegram')
-  const canAddEmail = !linkedTypes.has('email')
+  const canAddEmail = (oauthConfig?.email_enabled !== false) && !linkedTypes.has('email')
   const hasAddable = canAddGoogle || canAddVK || canAddTelegram || canAddEmail
 
   useEffect(() => {
@@ -199,12 +194,12 @@ export default function ProfilePage() {
                 key={p.type}
                 className="flex items-center justify-between rounded-input bg-white/5 px-3 py-2.5"
               >
-                <div className="flex items-center gap-2.5">
-                  <span className={cn('text-sm font-medium', PROVIDER_COLORS[p.type] ?? 'text-text-secondary')}>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className={cn('text-sm font-medium shrink-0', PROVIDER_COLORS[p.type] ?? 'text-text-secondary')}>
                     {PROVIDER_LABELS[p.type] ?? p.type}
                   </span>
-                  {p.username && (
-                    <span className="text-xs text-text-muted">@{p.username}</span>
+                  {p.identifier && (
+                    <span className="text-xs text-text-muted truncate">{p.identifier}</span>
                   )}
                 </div>
                 {canUnlink && (
@@ -245,17 +240,17 @@ export default function ProfilePage() {
             <Plus size={14} className="text-accent" /> Добавить способ входа
           </h2>
           <div className="flex flex-col gap-2">
-            {canAddGoogle && (
+            {canAddGoogle && oauthConfig?.google_client_id && (
               <button
-                onClick={startGoogleLink}
+                onClick={() => startGoogleLink(oauthConfig.google_client_id!)}
                 className="flex items-center gap-2.5 rounded-input bg-white/5 px-3 py-2.5 text-sm text-text-secondary hover:text-text-primary transition-colors text-left"
               >
                 Google
               </button>
             )}
-            {canAddVK && (
+            {canAddVK && oauthConfig?.vk_client_id && (
               <button
-                onClick={startVKLink}
+                onClick={() => startVKLink(oauthConfig.vk_client_id!)}
                 className="flex items-center gap-2.5 rounded-input bg-white/5 px-3 py-2.5 text-sm text-text-secondary hover:text-text-primary transition-colors text-left"
               >
                 ВКонтакте

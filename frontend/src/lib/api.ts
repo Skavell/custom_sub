@@ -12,7 +12,20 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+let refreshPromise: Promise<boolean> | null = null
+
+async function tryRefresh(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise
+  refreshPromise = fetch(`${BASE}/api/auth/refresh`, {
+    method: 'POST',
+    credentials: 'include',
+  }).then(r => r.ok).catch(() => false).finally(() => {
+    refreshPromise = null
+  })
+  return refreshPromise
+}
+
+async function request<T>(path: string, init?: RequestInit, isRetry = false): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     credentials: 'include',
     headers: {
@@ -21,6 +34,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
     ...init,
   })
+  if (res.status === 401 && !isRetry && path !== '/api/auth/refresh') {
+    const refreshed = await tryRefresh()
+    if (refreshed) return request<T>(path, init, true)
+    window.location.href = '/login'
+    throw new ApiError(401, 'Session expired')
+  }
   if (!res.ok) {
     let detail = `HTTP ${res.status}`
     try {

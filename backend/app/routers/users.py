@@ -12,7 +12,8 @@ from app.services.auth.oauth.google import exchange_google_code
 from app.services.auth.oauth.vk import exchange_vk_code
 from app.services.auth.oauth.telegram import verify_telegram_data, parse_telegram_user
 from app.services.auth.password_service import hash_password
-from app.services.setting_service import get_setting
+from app.services.setting_service import get_setting, get_setting_decrypted
+from app.config import settings as app_settings
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -27,13 +28,20 @@ async def get_me(
     )
     providers = result.scalars().all()
 
+    def _provider_identifier(p: "AuthProvider") -> str | None:
+        if p.provider == ProviderType.email:
+            return p.provider_user_id
+        if p.provider_username:
+            return f"@{p.provider_username}" if p.provider == ProviderType.telegram else p.provider_username
+        return None
+
     return UserProfileResponse(
         id=str(current_user.id),
         display_name=current_user.display_name,
         is_admin=current_user.is_admin,
         created_at=current_user.created_at,
         providers=[
-            ProviderInfo(type=p.provider.value, username=p.provider_username)
+            ProviderInfo(type=p.provider.value, username=p.provider_username, identifier=_provider_identifier(p))
             for p in providers
         ],
     )
@@ -114,8 +122,10 @@ async def link_google(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    client_id = await get_setting(db, "google_client_id") or app_settings.google_client_id
+    client_secret = await get_setting_decrypted(db, "google_client_secret") or app_settings.google_client_secret
     try:
-        g_user = await exchange_google_code(data.code, data.redirect_uri)
+        g_user = await exchange_google_code(data.code, data.redirect_uri, client_id, client_secret)
     except Exception:
         raise HTTPException(status_code=400, detail="Google OAuth failed")
     await _check_provider_not_taken(db, ProviderType.google, g_user.id)
@@ -123,6 +133,7 @@ async def link_google(
         user_id=current_user.id,
         provider=ProviderType.google,
         provider_user_id=g_user.id,
+        provider_username=g_user.email,
     ))
     await db.commit()
     return {"ok": True}
@@ -134,8 +145,10 @@ async def link_vk(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    vk_client_id = await get_setting(db, "vk_client_id") or app_settings.vk_client_id
+    vk_client_secret = await get_setting_decrypted(db, "vk_client_secret") or app_settings.vk_client_secret
     try:
-        vk_user = await exchange_vk_code(data.code, data.redirect_uri, data.device_id, data.state)
+        vk_user = await exchange_vk_code(data.code, data.redirect_uri, data.device_id, data.state, vk_client_id, vk_client_secret)
     except Exception:
         raise HTTPException(status_code=400, detail="VK OAuth failed")
     await _check_provider_not_taken(db, ProviderType.vk, vk_user.id)

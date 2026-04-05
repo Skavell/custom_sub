@@ -4,22 +4,17 @@ import { useQuery } from '@tanstack/react-query'
 import { api, ApiError } from '@/lib/api'
 import type { OAuthConfigResponse } from '@/types/api'
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
-const VK_CLIENT_ID = import.meta.env.VITE_VK_CLIENT_ID as string | undefined
-
-function loginWithGoogle() {
-  if (!GOOGLE_CLIENT_ID) return
+function loginWithGoogle(clientId: string) {
   const redirectUri = `${window.location.origin}/auth/google/callback`
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
-  url.searchParams.set('client_id', GOOGLE_CLIENT_ID)
+  url.searchParams.set('client_id', clientId)
   url.searchParams.set('redirect_uri', redirectUri)
   url.searchParams.set('response_type', 'code')
   url.searchParams.set('scope', 'openid email profile')
   window.location.href = url.toString()
 }
 
-function loginWithVK() {
-  if (!VK_CLIENT_ID) return
+function loginWithVK(clientId: string) {
   const deviceId = crypto.randomUUID()
   const state = crypto.randomUUID()
   localStorage.setItem('vk_device_id', deviceId)
@@ -27,7 +22,7 @@ function loginWithVK() {
   const redirectUri = `${window.location.origin}/auth/vk/callback`
   const url = new URL('https://id.vk.com/authorize')
   url.searchParams.set('response_type', 'code')
-  url.searchParams.set('client_id', VK_CLIENT_ID)
+  url.searchParams.set('client_id', clientId)
   url.searchParams.set('redirect_uri', redirectUri)
   url.searchParams.set('state', state)
   url.searchParams.set('device_id', deviceId)
@@ -80,8 +75,8 @@ export default function LoginPage() {
     staleTime: 5 * 60_000,
   })
 
-  const showGoogle = oauthConfig?.google && !!GOOGLE_CLIENT_ID
-  const showVK = oauthConfig?.vk && !!VK_CLIENT_ID
+  const showGoogle = oauthConfig?.google && !!oauthConfig.google_client_id
+  const showVK = oauthConfig?.vk && !!oauthConfig.vk_client_id
   const showTelegram = oauthConfig?.telegram && !!oauthConfig.telegram_bot_username
   const hasOAuth = showGoogle || showVK || showTelegram
 
@@ -123,10 +118,10 @@ export default function LoginPage() {
 
         {hasOAuth && (
           <div className="mb-5 flex flex-col gap-2">
-            {showGoogle && (
+            {showGoogle && oauthConfig?.google_client_id && (
               <button
                 type="button"
-                onClick={loginWithGoogle}
+                onClick={() => loginWithGoogle(oauthConfig.google_client_id!)}
                 className="w-full flex items-center justify-center gap-3 py-2 rounded-input border border-border-neutral bg-background text-sm text-text-primary hover:border-border-accent transition-colors"
               >
                 <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
@@ -139,10 +134,10 @@ export default function LoginPage() {
                 Войти через Google
               </button>
             )}
-            {showVK && (
+            {showVK && oauthConfig?.vk_client_id && (
               <button
                 type="button"
-                onClick={loginWithVK}
+                onClick={() => loginWithVK(oauthConfig.vk_client_id!)}
                 className="w-full flex items-center justify-center gap-3 py-2 rounded-input border border-border-neutral bg-background text-sm text-text-primary hover:border-border-accent transition-colors"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -168,6 +163,7 @@ export default function LoginPage() {
           </div>
         )}
 
+        {oauthConfig?.email_enabled !== false && (
         <div className="flex gap-2 mb-6">
           <button
             type="button"
@@ -188,8 +184,9 @@ export default function LoginPage() {
             Регистрация
           </button>
         </div>
+        )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        {oauthConfig?.email_enabled !== false && <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'register' && (
             <div>
               <label className="block text-sm text-text-secondary mb-1">Имя</label>
@@ -234,7 +231,7 @@ export default function LoginPage() {
           >
             {loading ? 'Загрузка...' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
           </button>
-        </form>
+        </form>}
       </div>
     </div>
   )

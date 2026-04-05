@@ -75,18 +75,39 @@ async def get_oauth_config(
     db: AsyncSession = Depends(get_db),
 ) -> OAuthConfigResponse:
     """Public endpoint — returns which OAuth providers are configured."""
-    google_enabled = bool(settings.google_client_id)
-    vk_enabled = bool(settings.vk_client_id)
+    # Google: DB setting takes priority over env var
+    google_client_id = await get_setting(db, "google_client_id") or settings.google_client_id or None
+    google_enabled_flag = await get_setting(db, "google_enabled")
+    google_active = (google_enabled_flag != "false") and bool(google_client_id)
+
+    # VK: DB setting takes priority over env var
+    vk_client_id = await get_setting(db, "vk_client_id") or settings.vk_client_id or None
+    vk_enabled_flag = await get_setting(db, "vk_enabled")
+    vk_active = (vk_enabled_flag != "false") and bool(vk_client_id)
+
+    # Telegram
     telegram_token = await get_setting(db, "telegram_bot_token")
     telegram_enabled = bool(telegram_token)
     bot_username: str | None = None
     if telegram_enabled:
         bot_username = await get_setting(db, "telegram_bot_username") or None
+
+    # Email
+    email_enabled_flag = await get_setting(db, "email_enabled")
+    email_enabled = email_enabled_flag != "false"
+
+    # Support link
+    support_telegram_url = await get_setting(db, "support_telegram_link") or None
+
     return OAuthConfigResponse(
-        google=google_enabled,
-        vk=vk_enabled,
+        google=google_active,
+        google_client_id=google_client_id if google_active else None,
+        vk=vk_active,
+        vk_client_id=vk_client_id if vk_active else None,
         telegram=telegram_enabled,
         telegram_bot_username=bot_username,
+        email_enabled=email_enabled,
+        support_telegram_url=support_telegram_url,
     )
 
 
@@ -224,8 +245,10 @@ async def oauth_google(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    client_id = await get_setting(db, "google_client_id") or settings.google_client_id
+    client_secret = await get_setting_decrypted(db, "google_client_secret") or settings.google_client_secret
     try:
-        g_user = await exchange_google_code(data.code, data.redirect_uri)
+        g_user = await exchange_google_code(data.code, data.redirect_uri, client_id, client_secret)
     except Exception as exc:
         logger.exception("Google OAuth exchange failed: %s", exc)
         raise HTTPException(status_code=400, detail="Google OAuth failed")
@@ -238,6 +261,7 @@ async def oauth_google(
             provider=ProviderType.google,
             provider_user_id=g_user.id,
             avatar_url=g_user.picture,
+            provider_username=g_user.email,
         )
 
     await _set_auth_cookies(response, str(user.id), redis)
@@ -251,8 +275,10 @@ async def oauth_vk(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    vk_client_id = await get_setting(db, "vk_client_id") or settings.vk_client_id
+    vk_client_secret = await get_setting_decrypted(db, "vk_client_secret") or settings.vk_client_secret
     try:
-        vk_user = await exchange_vk_code(data.code, data.redirect_uri, data.device_id, data.state)
+        vk_user = await exchange_vk_code(data.code, data.redirect_uri, data.device_id, data.state, vk_client_id, vk_client_secret)
     except Exception as exc:
         logger.exception("VK OAuth exchange failed: %s", exc)
         raise HTTPException(status_code=400, detail="VK OAuth failed")

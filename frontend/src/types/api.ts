@@ -3,6 +3,7 @@
 export interface ProviderInfo {
   type: string
   username: string | null
+  identifier: string | null
 }
 
 export interface UserProfile {
@@ -288,9 +289,13 @@ export interface SupportMessageAdminItem {
 
 export interface OAuthConfigResponse {
   google: boolean
+  google_client_id: string | null
   vk: boolean
+  vk_client_id: string | null
   telegram: boolean
   telegram_bot_username: string | null
+  email_enabled: boolean
+  support_telegram_url: string | null
 }
 
 export interface OsAppConfig {

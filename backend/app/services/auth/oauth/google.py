@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 import httpx
-from app.config import settings
 
 
 @dataclass
@@ -11,14 +10,14 @@ class GoogleUser:
     picture: str | None
 
 
-async def exchange_google_code(code: str, redirect_uri: str) -> GoogleUser:
+async def exchange_google_code(code: str, redirect_uri: str, client_id: str, client_secret: str) -> GoogleUser:
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(
             "https://oauth2.googleapis.com/token",
             data={
                 "code": code,
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "redirect_uri": redirect_uri,
                 "grant_type": "authorization_code",
             },

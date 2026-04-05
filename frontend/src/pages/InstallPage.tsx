@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Smartphone, Monitor, Download, Terminal, ExternalLink, Copy, Check } from 'lucide-react'
+import { Smartphone, Monitor, Terminal, Download, ExternalLink, Copy, Check, ChevronRight, ChevronLeft, AlertTriangle } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
@@ -26,7 +26,6 @@ const OS_TABS: { id: OS; label: string; icon: React.ComponentType<{ size?: strin
   { id: 'linux', label: 'Linux', icon: Terminal },
 ]
 
-// Deep link templates per app key (technical, not configurable)
 const DEEP_LINK_TEMPLATES: Record<string, (sub: string, name: string) => string> = {
   flclash: (sub) => `flclash://install-config?url=${encodeURIComponent(sub)}`,
   clash_mi: (sub, name) =>
@@ -35,41 +34,6 @@ const DEEP_LINK_TEMPLATES: Record<string, (sub: string, name: string) => string>
     `clashmeta://install-config?name=${encodeURIComponent(name)}&url=${encodeURIComponent(sub)}`,
 }
 
-// Steps per OS (generic)
-const OS_STEPS: Record<OS, string[]> = {
-  android: [
-    'Установите приложение',
-    'Нажмите кнопку ниже для автоматической настройки',
-    'Разрешите добавление профиля в приложении',
-    'Включите туннель',
-  ],
-  ios: [
-    'Установите приложение из App Store',
-    'Нажмите кнопку ниже для автоматической настройки',
-    'Подтвердите добавление VPN-профиля',
-    'Включите туннель',
-  ],
-  windows: [
-    'Установите приложение',
-    'Нажмите кнопку ниже для автоматической настройки',
-    'Разрешите добавление профиля',
-    'Включите туннель',
-  ],
-  macos: [
-    'Установите приложение',
-    'Нажмите кнопку ниже для автоматической настройки',
-    'Разрешите добавление профиля',
-    'Включите туннель',
-  ],
-  linux: [
-    'Установите приложение',
-    'Нажмите кнопку ниже для автоматической настройки',
-    'Разрешите добавление профиля',
-    'Включите туннель',
-  ],
-}
-
-// App key per OS for deep link (which deep link template to use)
 const OS_APP_KEY: Record<OS, string> = {
   android: 'flclash',
   ios: 'clash_mi',
@@ -100,6 +64,7 @@ function CopyButton({ text }: { text: string }) {
 export default function InstallPage() {
   const { user } = useAuth()
   const [activeOS, setActiveOS] = useState<OS>(detectOS)
+  const [step, setStep] = useState<1 | 2>(1)
 
   const { data: installData, isLoading, error } = useQuery<InstallLinkResponse>({
     queryKey: ['subscriptionLink'],
@@ -123,7 +88,6 @@ export default function InstallPage() {
   const storeUrl = osConfig?.store_url ?? '#'
   const deepLinkFn = DEEP_LINK_TEMPLATES[OS_APP_KEY[activeOS]]
   const deepLink = subLink && deepLinkFn ? deepLinkFn(subLink, displayName) : null
-  const steps = OS_STEPS[activeOS]
 
   return (
     <div className="p-4 md:p-6 max-w-2xl mx-auto">
@@ -154,7 +118,7 @@ export default function InstallPage() {
         {OS_TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => setActiveOS(id)}
+            onClick={() => { setActiveOS(id); setStep(1) }}
             className={cn(
               'flex items-center gap-1.5 rounded-input px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors',
               activeOS === id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-secondary',
@@ -166,51 +130,105 @@ export default function InstallPage() {
         ))}
       </div>
 
-      {/* Install steps */}
-      <div className="rounded-card bg-surface border border-border-neutral p-5 mb-4">
-        <h2 className="text-base font-semibold text-text-primary mb-4">{appName}</h2>
-        <ol className="space-y-4">
-          {steps.map((step, i) => (
-            <li key={i} className="flex gap-3">
-              <span className="h-6 w-6 rounded-full bg-accent/15 text-accent text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                {i + 1}
-              </span>
-              <span className="text-sm text-text-secondary">{step}</span>
-            </li>
-          ))}
-        </ol>
+      {/* Step indicator */}
+      <div className="flex items-center gap-3 mb-5">
+        <div className="flex items-center gap-2">
+          <div className={cn(
+            'h-6 w-6 rounded-full text-xs font-bold flex items-center justify-center',
+            step === 1 ? 'bg-accent text-white' : 'bg-accent/20 text-accent',
+          )}>1</div>
+          <span className={cn('text-xs font-medium', step === 1 ? 'text-text-primary' : 'text-text-muted')}>
+            Установка приложения
+          </span>
+        </div>
+        <div className="flex-1 h-px bg-border-neutral" />
+        <div className="flex items-center gap-2">
+          <div className={cn(
+            'h-6 w-6 rounded-full text-xs font-bold flex items-center justify-center',
+            step === 2 ? 'bg-accent text-white' : 'bg-white/10 text-text-muted',
+          )}>2</div>
+          <span className={cn('text-xs font-medium', step === 2 ? 'text-text-primary' : 'text-text-muted')}>
+            Добавление подписки
+          </span>
+        </div>
       </div>
 
-      {/* Download button — always visible */}
-      <a
-        href={storeUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center justify-center gap-2 w-full text-center rounded-input border border-border-neutral bg-surface hover:border-accent/40 text-text-secondary font-medium py-2.5 text-sm transition-colors mb-3"
-      >
-        <Download size={14} />
-        Скачать {appName}
-      </a>
+      {/* Step 1 */}
+      {step === 1 && (
+        <div className="rounded-card bg-surface border border-border-neutral p-5 mb-4">
+          <h2 className="text-base font-semibold text-text-primary mb-1">Скачайте {appName}</h2>
+          <p className="text-sm text-text-muted mb-5">
+            Установите приложение на ваше устройство
+          </p>
 
-      {/* Deep link button — only when subscription is active */}
-      {deepLink && (
-        <a
-          href={deepLink}
-          className="flex items-center justify-center gap-2 w-full text-center rounded-input bg-accent hover:bg-accent-hover text-white font-medium py-3 text-sm transition-colors mb-4"
-        >
-          <ExternalLink size={14} />
-          Установить подписку в {appName}
-        </a>
+          <a
+            href={storeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full text-center rounded-input bg-accent hover:bg-accent-hover text-white font-medium py-3 text-sm transition-colors mb-4"
+          >
+            <Download size={14} />
+            Скачать {appName}
+          </a>
+
+          <div className="flex items-start gap-2.5 rounded-input bg-yellow-500/10 border border-yellow-500/20 px-3 py-2.5 mb-5">
+            <AlertTriangle size={14} className="text-yellow-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-yellow-300">
+              После установки обязательно вернитесь на эту страницу для добавления подписки
+            </p>
+          </div>
+
+          <button
+            onClick={() => setStep(2)}
+            className="flex items-center justify-center gap-2 w-full rounded-input border border-border-neutral bg-white/5 hover:bg-white/10 text-text-secondary font-medium py-2.5 text-sm transition-colors"
+          >
+            Приложение установлено, далее
+            <ChevronRight size={14} />
+          </button>
+        </div>
       )}
 
-      {/* Manual fallback */}
-      {subLink && (
-        <div className="rounded-card bg-surface border border-border-neutral p-4">
-          <p className="text-xs text-text-muted mb-2">Или вставьте ссылку вручную:</p>
-          <div className="flex items-center gap-2 bg-white/5 rounded-input p-3">
-            <code className="flex-1 text-xs text-text-secondary break-all">{subLink}</code>
-            <CopyButton text={subLink} />
-          </div>
+      {/* Step 2 */}
+      {step === 2 && (
+        <div className="rounded-card bg-surface border border-border-neutral p-5 mb-4">
+          <h2 className="text-base font-semibold text-text-primary mb-1">Добавьте подписку</h2>
+          <p className="text-sm text-text-muted mb-5">
+            Нажмите кнопку ниже — подписка добавится в {appName} автоматически
+          </p>
+
+          {deepLink ? (
+            <a
+              href={deepLink}
+              className="flex items-center justify-center gap-2 w-full text-center rounded-input bg-accent hover:bg-accent-hover text-white font-medium py-3 text-sm transition-colors mb-4"
+            >
+              <ExternalLink size={14} />
+              Добавить подписку в {appName}
+            </a>
+          ) : (
+            <div className="rounded-input bg-white/5 border border-border-neutral px-4 py-3 text-xs text-text-muted mb-4">
+              {isLoading ? 'Загрузка ссылки…' : 'Подписка недоступна'}
+            </div>
+          )}
+
+          {subLink && (
+            <div className="rounded-card bg-white/5 border border-border-neutral p-4 mb-4">
+              <p className="text-xs text-text-muted mb-2">
+                Если кнопка не сработала — добавьте ссылку вручную:
+              </p>
+              <div className="flex items-center gap-2 bg-background rounded-input p-3">
+                <code className="flex-1 text-xs text-text-secondary break-all">{subLink}</code>
+                <CopyButton text={subLink} />
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={() => setStep(1)}
+            className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-secondary transition-colors"
+          >
+            <ChevronLeft size={13} />
+            Назад
+          </button>
         </div>
       )}
     </div>

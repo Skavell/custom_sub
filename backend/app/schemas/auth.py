@@ -57,9 +57,13 @@ class VKOAuthRequest(BaseModel):
 
 class OAuthConfigResponse(BaseModel):
     google: bool
+    google_client_id: str | None
     vk: bool
+    vk_client_id: str | None
     telegram: bool
     telegram_bot_username: str | None
+    email_enabled: bool
+    support_telegram_url: str | None
 
 
 class LinkEmailRequest(BaseModel):

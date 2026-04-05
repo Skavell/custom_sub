@@ -1,13 +1,22 @@
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { Send, MessageCircle, Loader2 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { api, ApiError } from '@/lib/api'
+import type { OAuthConfigResponse } from '@/types/api'
 
 export default function SupportPage() {
   const { user } = useAuth()
   const [message, setMessage] = useState('')
   const [sent, setSent] = useState(false)
+
+  const { data: oauthConfig } = useQuery<OAuthConfigResponse>({
+    queryKey: ['oauth-config'],
+    queryFn: () => api.get<OAuthConfigResponse>('/api/auth/oauth-config'),
+    staleTime: 5 * 60_000,
+  })
+
+  const supportUrl = oauthConfig?.support_telegram_url ?? null
 
   const mutation = useMutation({
     mutationFn: () => api.post('/api/support/message', { message: message.trim() }),
@@ -23,23 +32,25 @@ export default function SupportPage() {
       <p className="text-sm text-text-muted mb-6">Мы поможем решить любую проблему</p>
 
       {/* Telegram */}
-      <div className="rounded-card bg-surface border border-border-neutral p-4 mb-4 flex items-center gap-3">
-        <div className="h-10 w-10 rounded-full bg-[#229ED9]/15 flex items-center justify-center shrink-0">
-          <MessageCircle size={18} className="text-[#229ED9]" />
+      {supportUrl && (
+        <div className="rounded-card bg-surface border border-border-neutral p-4 mb-4 flex items-center gap-3">
+          <div className="h-10 w-10 rounded-full bg-[#229ED9]/15 flex items-center justify-center shrink-0">
+            <MessageCircle size={18} className="text-[#229ED9]" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium text-text-primary">Telegram</p>
+            <p className="text-xs text-text-muted">Быстрый ответ в рабочее время</p>
+          </div>
+          <a
+            href={supportUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-input bg-[#229ED9]/15 hover:bg-[#229ED9]/25 text-[#229ED9] px-3 py-1.5 text-sm font-medium transition-colors"
+          >
+            Написать
+          </a>
         </div>
-        <div className="flex-1">
-          <p className="text-sm font-medium text-text-primary">Telegram</p>
-          <p className="text-xs text-text-muted">Быстрый ответ в рабочее время</p>
-        </div>
-        <a
-          href="https://t.me/skavellion_support"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-input bg-[#229ED9]/15 hover:bg-[#229ED9]/25 text-[#229ED9] px-3 py-1.5 text-sm font-medium transition-colors"
-        >
-          Написать
-        </a>
-      </div>
+      )}
 
       {/* Contact form */}
       <div className="rounded-card bg-surface border border-border-neutral p-5">

@@ -68,7 +68,7 @@ function PlanCard({
       <p className="text-xs text-text-muted mt-1">{pricePerMonth(plan)}₽/мес</p>
       {showNewUserPrice && (
         <span className="mt-2 inline-block text-[10px] bg-emerald-500/15 text-emerald-400 rounded-full px-2 py-0.5">
-          Скидка для новых
+          Скидка для новых пользователей
         </span>
       )}
     </button>
