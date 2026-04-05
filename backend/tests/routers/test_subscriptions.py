@@ -135,6 +135,53 @@ async def test_get_me_no_subscription():
 
 
 @pytest.mark.asyncio
+async def test_trial_blocked_when_email_not_verified():
+    """Returns 403 when email_verification_enabled=true and email not verified."""
+    from app.models.auth_provider import AuthProvider, ProviderType
+
+    user = _make_user()
+    user.is_banned = False
+
+    email_provider = MagicMock(spec=AuthProvider)
+    email_provider.provider = ProviderType.email
+    email_provider.email_verified = False
+
+    db = AsyncMock(spec=AsyncSession)
+    redis = AsyncMock()
+
+    async def mock_get_setting(d, key):
+        if key == "email_verification_enabled":
+            return "true"
+        if key == "remnawave_url":
+            return "http://remnawave"
+        if key == "remnawave_token":
+            return "token"
+        return None
+
+    async def mock_get_setting_decrypted(d, key):
+        return "token"
+
+    result_mock = MagicMock()
+    result_mock.scalar_one_or_none.return_value = email_provider
+    db.execute = AsyncMock(return_value=result_mock)
+
+    app.dependency_overrides[get_current_user] = _override_get_current_user(user)
+    app.dependency_overrides[get_db] = _override_get_db(db)
+    app.dependency_overrides[get_redis] = _override_get_redis(redis)
+
+    try:
+        with patch("app.routers.subscriptions.get_setting", new=AsyncMock(side_effect=mock_get_setting)):
+            with patch("app.routers.subscriptions.get_setting_decrypted", new=AsyncMock(side_effect=mock_get_setting_decrypted)):
+                with patch("app.routers.subscriptions.check_rate_limit", new=AsyncMock(return_value=True)):
+                    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                        resp = await client.post("/api/subscriptions/trial")
+        assert resp.status_code == 403
+        assert "Подтвердите email" in resp.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_get_me_with_subscription():
     """Returns subscription details when subscription exists."""
     from datetime import timedelta
