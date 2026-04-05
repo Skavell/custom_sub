@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -20,7 +21,7 @@ from app.models.plan import Plan
 from app.models.promo_code import PromoCode, PromoCodeType
 from app.models.setting import Setting
 from app.models.support_message import SupportMessage
-from app.models.subscription import Subscription
+from app.models.subscription import Subscription, SubscriptionStatus
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.redis_client import get_redis
@@ -202,7 +203,6 @@ async def reset_subscription(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    from datetime import datetime, timezone
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
@@ -213,7 +213,6 @@ async def reset_subscription(
     sub = sub_result.scalar_one_or_none()
     if sub is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Подписка не найдена")
-    from app.models.subscription import SubscriptionStatus
     sub.status = SubscriptionStatus.expired
     sub.expires_at = datetime.now(tz=timezone.utc)
     await db.commit()
@@ -591,7 +590,6 @@ async def admin_upsert_setting(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> SettingAdminItem:
-    from datetime import datetime, timezone
     await set_setting(db, key, data.value, data.is_sensitive)
     return SettingAdminItem(
         key=key,

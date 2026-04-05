@@ -139,5 +139,6 @@ async def test_reset_subscription_marks_expired():
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         assert sub.status == SubscriptionStatus.expired
+        assert sub.expires_at is not None
     finally:
         app.dependency_overrides.clear()
