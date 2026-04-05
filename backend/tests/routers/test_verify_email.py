@@ -37,10 +37,10 @@ def _override_redis(mock_redis):
 @pytest.mark.asyncio
 async def test_send_verify_already_verified_returns_200():
     """Returns 200 no-op if email already verified."""
-    user, _ = _make_user_with_email(email_verified=True)
+    user, provider = _make_user_with_email(email_verified=True)
     db = AsyncMock()
     result = MagicMock()
-    result.scalar_one_or_none.return_value = None  # scalar_one_or_none used in endpoint for DB query
+    result.scalar_one_or_none.return_value = provider  # returns already-verified provider
     db.execute = AsyncMock(return_value=result)
     redis = AsyncMock()
 

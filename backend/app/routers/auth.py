@@ -298,9 +298,8 @@ async def send_verify_email(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    from sqlalchemy import select as _sel
     result = await db.execute(
-        _sel(AuthProvider).where(
+        _select(AuthProvider).where(
             AuthProvider.user_id == current_user.id,
             AuthProvider.provider == ProviderType.email,
         )
@@ -322,8 +321,7 @@ async def send_verify_email(
         raise HTTPException(status_code=429, detail="Слишком много попыток. Попробуйте через час.")
 
     # Generate token and store in Redis
-    import uuid as _uuid2
-    token = str(_uuid2.uuid4())
+    token = str(_uuid.uuid4())
     await redis.setex(f"verify_email:{token}", 86400, str(current_user.id))
 
     # Send email
@@ -359,14 +357,12 @@ async def confirm_verify_email(
         return RedirectResponse(url=f"{frontend_url}/verify-email?error=expired", status_code=302)
 
     try:
-        import uuid as _uuid3
-        user_uuid = _uuid3.UUID(user_id_str if isinstance(user_id_str, str) else user_id_str.decode())
+        user_uuid = _uuid.UUID(user_id_str if isinstance(user_id_str, str) else user_id_str.decode())
     except ValueError:
         return RedirectResponse(url=f"{frontend_url}/verify-email?error=expired", status_code=302)
 
-    from sqlalchemy import select as _sel2
     result = await db.execute(
-        _sel2(AuthProvider).where(
+        _select(AuthProvider).where(
             AuthProvider.user_id == user_uuid,
             AuthProvider.provider == ProviderType.email,
         )
