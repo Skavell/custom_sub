@@ -136,7 +136,10 @@ function ToggleSettingRow({ setting, label, hint }: { setting: SettingAdminItem;
       setIsOn(v === 'true')
       setSaveError(null)
     },
-    onError: (e) => setSaveError(e instanceof ApiError ? e.detail : 'Ошибка'),
+    onError: (e) => {
+      setIsOn(setting.value === 'true')
+      setSaveError(e instanceof ApiError ? e.detail : 'Ошибка')
+    },
   })
 
   const toggle = () => {
