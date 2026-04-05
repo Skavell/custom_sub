@@ -61,7 +61,7 @@ function SettingRow({
 
   const mutation = useMutation({
     mutationFn: (v: string) =>
-      api.put(`/api/admin/settings/${setting.key}`, { value: v }),
+      api.put(`/api/admin/settings/${setting.key}`, { value: v, is_sensitive: setting.is_sensitive }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-settings'] })
       setSaved(true)
@@ -130,7 +130,7 @@ function ToggleSettingRow({ setting, label, hint }: { setting: SettingAdminItem;
 
   const mutation = useMutation({
     mutationFn: (v: string) =>
-      api.put(`/api/admin/settings/${setting.key}`, { value: v }),
+      api.put(`/api/admin/settings/${setting.key}`, { value: v, is_sensitive: setting.is_sensitive }),
     onSuccess: (_, v) => {
       queryClient.invalidateQueries({ queryKey: ['admin-settings'] })
       setIsOn(v === 'true')
@@ -180,7 +180,7 @@ function TextareaSettingRow({ setting, label, hint }: { setting: SettingAdminIte
 
   const mutation = useMutation({
     mutationFn: (v: string) =>
-      api.put(`/api/admin/settings/${setting.key}`, { value: v }),
+      api.put(`/api/admin/settings/${setting.key}`, { value: v, is_sensitive: setting.is_sensitive }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-settings'] })
       setSaved(true)
@@ -240,7 +240,7 @@ function NumberBytesSettingRow({ setting, label, hint }: { setting: SettingAdmin
 
   const mutation = useMutation({
     mutationFn: (v: string) =>
-      api.put(`/api/admin/settings/${setting.key}`, { value: v }),
+      api.put(`/api/admin/settings/${setting.key}`, { value: v, is_sensitive: setting.is_sensitive }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-settings'] })
       setSaved(true)
