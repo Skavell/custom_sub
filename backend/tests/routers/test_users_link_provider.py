@@ -85,7 +85,9 @@ async def test_link_google_already_linked():
     g_user.id = "google-123"
 
     try:
-        with patch("app.routers.users.exchange_google_code", new_callable=AsyncMock, return_value=g_user):
+        with patch("app.routers.users.exchange_google_code", new_callable=AsyncMock, return_value=g_user), \
+             patch("app.routers.users.get_setting", new_callable=AsyncMock, return_value=None), \
+             patch("app.routers.users.get_setting_decrypted", new_callable=AsyncMock, return_value=None):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 resp = await client.post("/api/users/me/providers/google", json={
                     "code": "auth-code",
@@ -123,7 +125,9 @@ async def test_link_google_taken_by_other_user():
     g_user.id = "google-123"
 
     try:
-        with patch("app.routers.users.exchange_google_code", new_callable=AsyncMock, return_value=g_user):
+        with patch("app.routers.users.exchange_google_code", new_callable=AsyncMock, return_value=g_user), \
+             patch("app.routers.users.get_setting", new_callable=AsyncMock, return_value=None), \
+             patch("app.routers.users.get_setting_decrypted", new_callable=AsyncMock, return_value=None):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 resp = await client.post("/api/users/me/providers/google", json={
                     "code": "auth-code",

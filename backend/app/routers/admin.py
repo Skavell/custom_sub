@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -20,7 +21,7 @@ from app.models.plan import Plan
 from app.models.promo_code import PromoCode, PromoCodeType
 from app.models.setting import Setting
 from app.models.support_message import SupportMessage
-from app.models.subscription import Subscription
+from app.models.subscription import Subscription, SubscriptionStatus
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.redis_client import get_redis
@@ -55,11 +56,13 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 def _build_list_item(u: User) -> UserAdminListItem:
     sub = u.subscription
+    email_provider = next((p for p in u.auth_providers if p.provider.value == "email"), None)
     return UserAdminListItem(
         id=u.id,
         display_name=u.display_name,
         avatar_url=u.avatar_url,
         is_admin=u.is_admin,
+        is_banned=u.is_banned,
         remnawave_uuid=u.remnawave_uuid,
         has_made_payment=u.has_made_payment,
         subscription_conflict=u.subscription_conflict,
@@ -69,6 +72,8 @@ def _build_list_item(u: User) -> UserAdminListItem:
         subscription_type=sub.type.value if sub else None,
         subscription_expires_at=sub.expires_at if sub else None,
         providers=[p.provider.value for p in u.auth_providers],
+        email=email_provider.provider_user_id if email_provider else None,
+        email_verified=email_provider.email_verified if email_provider else None,
     )
 
 
@@ -104,12 +109,7 @@ async def list_users(
     return [_build_list_item(u) for u in users]
 
 
-@router.get("/users/{user_id}", response_model=UserAdminDetail)
-async def get_user_detail(
-    user_id: uuid.UUID,
-    admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-) -> UserAdminDetail:
+async def _build_user_detail(user_id: uuid.UUID, db: AsyncSession) -> UserAdminDetail:
     result = await db.execute(
         select(User)
         .where(User.id == user_id)
@@ -118,7 +118,6 @@ async def get_user_detail(
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
-
     tx_result = await db.execute(
         select(Transaction)
         .where(Transaction.user_id == user_id)
@@ -126,21 +125,98 @@ async def get_user_detail(
         .limit(10)
     )
     transactions = tx_result.scalars().all()
-
+    email_provider = next((p for p in user.auth_providers if p.provider.value == "email"), None)
     return UserAdminDetail(
         id=user.id,
         display_name=user.display_name,
         avatar_url=user.avatar_url,
         is_admin=user.is_admin,
+        is_banned=user.is_banned,
         remnawave_uuid=user.remnawave_uuid,
         has_made_payment=user.has_made_payment,
         subscription_conflict=user.subscription_conflict,
         created_at=user.created_at,
         last_seen_at=user.last_seen_at,
+        email=email_provider.provider_user_id if email_provider else None,
+        email_verified=email_provider.email_verified if email_provider else None,
         subscription=SubscriptionAdminInfo.model_validate(user.subscription) if user.subscription else None,
-        providers=[ProviderInfo.model_validate(p) for p in user.auth_providers],
+        providers=[
+            ProviderInfo(
+                provider=p.provider.value,
+                provider_user_id=p.provider_user_id,
+                provider_username=p.provider_username,
+                email_verified=p.email_verified if p.provider.value == "email" else None,
+                created_at=p.created_at,
+            )
+            for p in user.auth_providers
+        ],
         recent_transactions=[TransactionAdminItem.model_validate(tx) for tx in transactions],
     )
+
+
+@router.get("/users/{user_id}", response_model=UserAdminDetail)
+async def get_user_detail(
+    user_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> UserAdminDetail:
+    return await _build_user_detail(user_id, db)
+
+
+@router.patch("/users/{user_id}/ban", response_model=UserAdminDetail)
+async def ban_user(
+    user_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> UserAdminDetail:
+    if user_id == admin.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нельзя заблокировать себя")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    user.is_banned = not user.is_banned
+    await db.commit()
+    return await _build_user_detail(user_id, db)
+
+
+@router.patch("/users/{user_id}/admin", response_model=UserAdminDetail)
+async def toggle_admin(
+    user_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> UserAdminDetail:
+    if user_id == admin.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нельзя изменить собственные права администратора")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    user.is_admin = not user.is_admin
+    await db.commit()
+    return await _build_user_detail(user_id, db)
+
+
+@router.post("/users/{user_id}/reset-subscription")
+async def reset_subscription(
+    user_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    sub_result = await db.execute(
+        select(Subscription).where(Subscription.user_id == user_id)
+    )
+    sub = sub_result.scalar_one_or_none()
+    if sub is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Подписка не найдена")
+    sub.status = SubscriptionStatus.expired
+    sub.expires_at = datetime.now(tz=timezone.utc)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/users/{user_id}/sync")
@@ -514,7 +590,6 @@ async def admin_upsert_setting(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> SettingAdminItem:
-    from datetime import datetime, timezone
     await set_setting(db, key, data.value, data.is_sensitive)
     return SettingAdminItem(
         key=key,

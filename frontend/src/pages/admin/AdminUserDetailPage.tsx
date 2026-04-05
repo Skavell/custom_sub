@@ -1,18 +1,100 @@
-// frontend/src/pages/admin/AdminUserDetailPage.tsx
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, RefreshCw, AlertTriangle, CheckCircle } from 'lucide-react'
+import {
+  ArrowLeft, RefreshCw, Shield, ShieldOff, UserCheck, UserX,
+  RotateCcw, CheckCircle, XCircle, AlertTriangle,
+} from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
+import { useAuth } from '@/hooks/useAuth'
 import type { UserAdminDetail, ConflictResolveRequest } from '@/types/api'
+
+// ─── Confirmation dialog ──────────────────────────────────────────────────────
+
+interface ConfirmDialogProps {
+  message: string
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+function ConfirmDialog({ message, onConfirm, onCancel }: ConfirmDialogProps) {
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
+      <div className="bg-surface border border-border-neutral rounded-card p-6 max-w-sm w-full space-y-4">
+        <p className="text-sm text-text-primary">{message}</p>
+        <div className="flex gap-3">
+          <button
+            onClick={onConfirm}
+            className="flex-1 py-2 rounded-input bg-red-500/20 text-red-400 text-sm font-medium hover:bg-red-500/30 transition-colors"
+          >
+            Подтвердить
+          </button>
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2 rounded-input bg-surface border border-border-neutral text-text-secondary text-sm hover:border-accent transition-colors"
+          >
+            Отмена
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Info row ────────────────────────────────────────────────────────────────
+
+function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-4 py-2 border-b border-border-neutral/50 last:border-0">
+      <span className="text-xs text-text-muted sm:w-36 shrink-0">{label}</span>
+      <span className="text-sm text-text-primary break-all">{value ?? '—'}</span>
+    </div>
+  )
+}
+
+// ─── Action button ───────────────────────────────────────────────────────────
+
+function ActionBtn({
+  onClick, icon, label, variant = 'default', disabled,
+}: {
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+  variant?: 'default' | 'danger'
+  disabled?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex items-center gap-2 px-3 py-2 rounded-input text-xs font-medium transition-colors disabled:opacity-50 ${
+        variant === 'danger'
+          ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
+          : 'bg-surface border border-border-neutral text-text-secondary hover:border-accent hover:text-accent'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
+// ─── Main page ───────────────────────────────────────────────────────────────
 
 export default function AdminUserDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [syncMsg, setSyncMsg] = useState<string | null>(null)
-  const [resolveMsg, setResolveMsg] = useState<string | null>(null)
+  const { user: currentAdmin } = useAuth()
+
   const [resolveUuid, setResolveUuid] = useState('')
+  const [confirm, setConfirm] = useState<{ message: string; action: () => void } | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const flash = (text: string) => {
+    setMsg(text)
+    setTimeout(() => setMsg(null), 3000)
+  }
 
   const { data: user, isLoading, error } = useQuery<UserAdminDetail>({
     queryKey: ['admin-user', id],
@@ -20,25 +102,50 @@ export default function AdminUserDetailPage() {
     enabled: !!id,
   })
 
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin-user', id] })
+
+  const banMutation = useMutation({
+    mutationFn: () => api.patch<UserAdminDetail>(`/api/admin/users/${id}/ban`, {}),
+    onSuccess: (updated: UserAdminDetail) => {
+      queryClient.setQueryData(['admin-user', id], updated)
+      flash(updated.is_banned ? 'Пользователь заблокирован' : 'Пользователь разблокирован')
+    },
+  })
+
+  const adminMutation = useMutation({
+    mutationFn: () => api.patch<UserAdminDetail>(`/api/admin/users/${id}/admin`, {}),
+    onSuccess: (updated: UserAdminDetail) => {
+      queryClient.setQueryData(['admin-user', id], updated)
+      flash(updated.is_admin ? 'Права администратора выданы' : 'Права администратора отозваны')
+    },
+  })
+
+  const resetSubMutation = useMutation({
+    mutationFn: () => api.post(`/api/admin/users/${id}/reset-subscription`, {}),
+    onSuccess: () => {
+      invalidate()
+      flash('Подписка сброшена')
+    },
+  })
+
   const syncMutation = useMutation({
     mutationFn: () => api.post(`/api/admin/users/${id}/sync`, {}),
-    onSuccess: () => {
-      setSyncMsg('Синхронизация выполнена')
-      queryClient.invalidateQueries({ queryKey: ['admin-user', id] })
-      setTimeout(() => setSyncMsg(null), 3000)
-    },
+    onSuccess: () => { invalidate(); flash('Синхронизация выполнена') },
   })
 
   const resolveMutation = useMutation({
     mutationFn: (data: ConflictResolveRequest) =>
       api.post(`/api/admin/users/${id}/resolve-conflict`, data),
     onSuccess: () => {
-      setResolveMsg('Конфликт разрешён')
-      queryClient.invalidateQueries({ queryKey: ['admin-user', id] })
+      invalidate()
       queryClient.invalidateQueries({ queryKey: ['admin-users'] })
-      setTimeout(() => setResolveMsg(null), 3000)
+      setResolveUuid('')
+      flash('Конфликт разрешён')
     },
   })
+
+  const askConfirm = (message: string, action: () => void) =>
+    setConfirm({ message, action })
 
   if (isLoading) {
     return (
@@ -58,141 +165,215 @@ export default function AdminUserDetailPage() {
     )
   }
 
+  const isSelf = currentAdmin?.id === user.id
+  const sub = user.subscription
+
   return (
-    <div className="p-4 md:p-6 max-w-2xl mx-auto">
-      <button
-        onClick={() => navigate('/admin/users')}
-        className="flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary mb-5 transition-colors"
-      >
-        <ArrowLeft size={15} /> Назад
-      </button>
+    <div className="max-w-2xl mx-auto space-y-6 p-4 sm:p-6">
+      {confirm && (
+        <ConfirmDialog
+          message={confirm.message}
+          onConfirm={() => { confirm.action(); setConfirm(null) }}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
 
-      <div className="flex items-start justify-between mb-5 gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-text-primary">{user.display_name}</h1>
-          <p className="text-xs text-text-muted mt-0.5">
-            {user.providers.map((p) => p.provider_username ?? p.provider).join(' · ')}
-          </p>
-        </div>
+      {/* Header */}
+      <div className="flex items-center gap-3">
         <button
-          onClick={() => syncMutation.mutate()}
-          disabled={syncMutation.isPending}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-input bg-white/5 text-sm text-text-secondary hover:text-text-primary disabled:opacity-50 transition-colors"
+          onClick={() => navigate('/admin/users')}
+          className="text-text-muted hover:text-text-primary transition-colors"
         >
-          <RefreshCw size={14} className={syncMutation.isPending ? 'animate-spin' : ''} />
-          Синхронизировать
+          <ArrowLeft size={18} />
         </button>
+        <h1 className="text-lg font-semibold text-text-primary truncate">{user.display_name}</h1>
+        {user.is_banned && (
+          <span className="px-2 py-0.5 rounded text-xs bg-red-500/15 text-red-400">Заблокирован</span>
+        )}
+        {user.is_admin && (
+          <span className="px-2 py-0.5 rounded text-xs bg-accent/15 text-accent">Админ</span>
+        )}
       </div>
 
-      {syncMsg && (
-        <div className="flex items-center gap-2 text-xs text-green-400 mb-3">
-          <CheckCircle size={13} /> {syncMsg}
+      {msg && (
+        <div className="flex items-center gap-2 text-xs text-green-400 bg-green-500/10 rounded-input px-3 py-2">
+          <CheckCircle size={13} />
+          {msg}
         </div>
       )}
 
-      {user.subscription_conflict && (
-        <div className="rounded-input bg-red-500/10 border border-red-500/20 px-4 py-3 mb-4">
-          <div className="flex items-center gap-2 text-sm text-red-400 mb-2">
-            <AlertTriangle size={15} />
-            Конфликт подписки — укажите Remnawave UUID для сохранения
-          </div>
-          <p className="text-xs text-text-muted mb-2">
-            Текущий: <span className="font-mono">{user.remnawave_uuid ?? '—'}</span>
-          </p>
-          <div className="flex gap-2">
-            <input
-              value={resolveUuid}
-              onChange={(e) => setResolveUuid(e.target.value)}
-              placeholder="UUID для сохранения"
-              className="flex-1 rounded-input bg-background border border-red-500/30 px-2.5 py-1.5 text-xs text-text-primary font-mono focus:outline-none focus:border-red-400"
-            />
-            <button
-              onClick={() => resolveMutation.mutate({ remnawave_uuid: resolveUuid })}
-              disabled={resolveMutation.isPending || !resolveUuid.trim()}
-              className="text-xs px-2.5 py-1.5 rounded-input bg-red-500/20 text-red-300 hover:bg-red-500/30 disabled:opacity-50 transition-colors"
-            >
-              Разрешить
-            </button>
-          </div>
-        </div>
-      )}
-
-      {resolveMsg && (
-        <div className="flex items-center gap-2 text-xs text-green-400 mb-3">
-          <CheckCircle size={13} /> {resolveMsg}
-        </div>
-      )}
-
-      {/* Info */}
-      <div className="rounded-card bg-surface border border-border-neutral p-4 mb-4">
-        <h2 className="text-sm font-semibold text-text-primary mb-3">Информация</h2>
-        <div className="flex flex-col gap-2">
-          {[
-            ['ID', user.id],
-            ['Remnawave UUID', user.remnawave_uuid ?? '—'],
-            ['Оплачивал', user.has_made_payment ? 'Да' : 'Нет'],
-            ['Создан', new Date(user.created_at).toLocaleString('ru-RU')],
-            ['Последняя активность', new Date(user.last_seen_at).toLocaleString('ru-RU')],
-          ].map(([label, value]) => (
-            <div key={label} className="flex justify-between gap-3 text-sm">
-              <span className="text-text-muted shrink-0">{label}</span>
-              <span className="text-text-secondary text-right break-all">{value}</span>
+      {/* Info section */}
+      <div className="rounded-card bg-surface border border-border-neutral p-4 sm:p-5 space-y-0.5">
+        <h2 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
+          Информация
+        </h2>
+        <InfoRow label="ID" value={<span className="font-mono text-xs">{user.id}</span>} />
+        <InfoRow
+          label="Email"
+          value={
+            user.email ? (
+              <span className="flex items-center gap-2">
+                {user.email}
+                {user.email_verified === true && (
+                  <CheckCircle size={13} className="text-green-400 shrink-0" />
+                )}
+                {user.email_verified === false && (
+                  <XCircle size={13} className="text-yellow-400 shrink-0" />
+                )}
+              </span>
+            ) : null
+          }
+        />
+        <InfoRow
+          label="Провайдеры"
+          value={
+            <div className="space-y-1">
+              {user.providers.map((p) => (
+                <div key={p.provider} className="flex items-center gap-2 text-xs">
+                  <span className="font-medium text-text-primary capitalize">{p.provider}</span>
+                  {p.provider_username && (
+                    <span className="text-text-muted">@{p.provider_username}</span>
+                  )}
+                  {p.provider_user_id && (
+                    <span className="font-mono text-text-muted">{p.provider_user_id}</span>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          }
+        />
+        <InfoRow label="Создан" value={new Date(user.created_at).toLocaleString('ru-RU')} />
+        <InfoRow label="Последний вход" value={new Date(user.last_seen_at).toLocaleString('ru-RU')} />
+        <InfoRow
+          label="Подписка"
+          value={
+            sub ? (
+              <span>
+                {sub.type} · {sub.status} · до {new Date(sub.expires_at).toLocaleDateString('ru-RU')}
+                {sub.traffic_limit_gb != null && ` · ${sub.traffic_limit_gb} ГБ`}
+              </span>
+            ) : null
+          }
+        />
+        <InfoRow
+          label="Remnawave UUID"
+          value={
+            user.remnawave_uuid ? (
+              <span className="font-mono text-xs">{user.remnawave_uuid}</span>
+            ) : null
+          }
+        />
       </div>
 
-      {/* Subscription */}
-      {user.subscription && (
-        <div className="rounded-card bg-surface border border-border-neutral p-4 mb-4">
-          <h2 className="text-sm font-semibold text-text-primary mb-3">Подписка</h2>
-          <div className="flex flex-col gap-2">
-            {[
-              ['Тип', user.subscription.type === 'trial' ? 'Пробная' : 'Платная'],
-              ['Статус', user.subscription.status],
-              ['Истекает', new Date(user.subscription.expires_at).toLocaleDateString('ru-RU')],
-            ].map(([label, value]) => (
-              <div key={label} className="flex justify-between gap-3 text-sm">
-                <span className="text-text-muted">{label}</span>
-                <span className="text-text-secondary">{value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Actions */}
+      <div className="rounded-card bg-surface border border-border-neutral p-4 sm:p-5 space-y-4">
+        <h2 className="text-xs font-medium text-text-muted uppercase tracking-wider">
+          Действия
+        </h2>
 
-      {/* Transactions */}
-      {user.recent_transactions.length > 0 && (
-        <div className="rounded-card bg-surface border border-border-neutral p-4">
-          <h2 className="text-sm font-semibold text-text-primary mb-3">Последние транзакции</h2>
-          <div className="flex flex-col gap-1">
-            {user.recent_transactions.map((tx) => (
-              <div
-                key={tx.id}
-                className="flex items-center justify-between gap-3 py-1.5 border-b border-border-neutral last:border-0"
+        <div className="flex flex-wrap gap-2">
+          {/* Ban */}
+          <ActionBtn
+            onClick={() =>
+              askConfirm(
+                user.is_banned
+                  ? `Разблокировать пользователя ${user.display_name}?`
+                  : `Заблокировать пользователя ${user.display_name}?`,
+                () => banMutation.mutate(),
+              )
+            }
+            icon={user.is_banned ? <Shield size={14} /> : <ShieldOff size={14} />}
+            label={user.is_banned ? 'Разблокировать' : 'Заблокировать'}
+            variant={user.is_banned ? 'default' : 'danger'}
+            disabled={isSelf || banMutation.isPending}
+          />
+
+          {/* Admin toggle */}
+          <ActionBtn
+            onClick={() =>
+              askConfirm(
+                user.is_admin
+                  ? `Забрать права администратора у ${user.display_name}?`
+                  : `Выдать права администратора ${user.display_name}?`,
+                () => adminMutation.mutate(),
+              )
+            }
+            icon={user.is_admin ? <UserX size={14} /> : <UserCheck size={14} />}
+            label={user.is_admin ? 'Забрать права' : 'Сделать админом'}
+            disabled={isSelf || adminMutation.isPending}
+          />
+
+          {/* Reset subscription */}
+          <ActionBtn
+            onClick={() =>
+              askConfirm(
+                `Сбросить подписку пользователя ${user.display_name}? Локальный сброс — Remnawave не затронут.`,
+                () => resetSubMutation.mutate(),
+              )
+            }
+            icon={<RotateCcw size={14} />}
+            label="Сбросить подписку"
+            variant="danger"
+            disabled={!sub || resetSubMutation.isPending}
+          />
+
+          {/* Sync */}
+          <ActionBtn
+            onClick={() =>
+              askConfirm(
+                `Синхронизировать ${user.display_name} с Remnawave?`,
+                () => syncMutation.mutate(),
+              )
+            }
+            icon={<RefreshCw size={14} />}
+            label="Синхронизировать"
+            disabled={!user.remnawave_uuid || syncMutation.isPending}
+          />
+        </div>
+
+        {/* Resolve conflict */}
+        {user.subscription_conflict && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs text-yellow-400">
+              <AlertTriangle size={13} />
+              Конфликт UUID — введите правильный Remnawave UUID:
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={resolveUuid}
+                onChange={(e) => setResolveUuid(e.target.value)}
+                placeholder="UUID из Remnawave"
+                className="flex-1 rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
+              />
+              <button
+                onClick={() => resolveMutation.mutate({ remnawave_uuid: resolveUuid })}
+                disabled={!resolveUuid.trim() || resolveMutation.isPending}
+                className="px-3 py-1.5 rounded-input bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 transition-colors disabled:opacity-50"
               >
-                <div>
-                  <span className="text-xs text-text-primary">{tx.type}</span>
-                  {tx.days_added && (
-                    <span className="ml-2 text-xs text-text-muted">+{tx.days_added}д</span>
-                  )}
-                </div>
-                <div className="text-right">
-                  {tx.amount_rub && (
-                    <span className="text-xs text-text-secondary">{tx.amount_rub} ₽</span>
-                  )}
-                  <span
-                    className={`ml-2 text-xs ${
-                      tx.status === 'completed'
-                        ? 'text-green-400'
-                        : tx.status === 'failed'
-                        ? 'text-red-400'
-                        : 'text-text-muted'
-                    }`}
-                  >
-                    {tx.status}
-                  </span>
-                </div>
+                Применить
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Recent transactions */}
+      {user.recent_transactions.length > 0 && (
+        <div className="rounded-card bg-surface border border-border-neutral p-4 sm:p-5 space-y-3">
+          <h2 className="text-xs font-medium text-text-muted uppercase tracking-wider">
+            Последние транзакции
+          </h2>
+          <div className="space-y-2">
+            {user.recent_transactions.map((tx) => (
+              <div key={tx.id} className="flex items-center justify-between text-xs">
+                <span className="text-text-secondary">{tx.type}</span>
+                <span className="text-text-muted">{new Date(tx.created_at).toLocaleDateString('ru-RU')}</span>
+                <span className={tx.status === 'completed' ? 'text-green-400' : 'text-text-muted'}>
+                  {tx.status}
+                </span>
+                {tx.days_added != null && (
+                  <span className="text-accent">+{tx.days_added}д</span>
+                )}
               </div>
             ))}
           </div>

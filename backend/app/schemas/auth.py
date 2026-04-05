@@ -64,6 +64,7 @@ class OAuthConfigResponse(BaseModel):
     telegram_bot_username: str | None
     email_enabled: bool
     support_telegram_url: str | None
+    email_verification_required: bool = False
 
 
 class LinkEmailRequest(BaseModel):

@@ -30,11 +30,15 @@ def _make_provider(
     user_id: uuid.UUID,
     provider: ProviderType,
     username: str | None = None,
+    provider_user_id: str | None = None,
+    email_verified: bool | None = None,
 ) -> AuthProvider:
     ap = MagicMock(spec=AuthProvider)
     ap.user_id = user_id
     ap.provider = provider
     ap.provider_username = username
+    ap.provider_user_id = provider_user_id
+    ap.email_verified = email_verified
     return ap
 
 

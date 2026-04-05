@@ -23,6 +23,7 @@ import AdminArticlesPage from '@/pages/admin/AdminArticlesPage'
 import AdminArticleEditPage from '@/pages/admin/AdminArticleEditPage'
 import AdminSettingsPage from '@/pages/admin/AdminSettingsPage'
 import AdminSupportMessagesPage from '@/pages/admin/AdminSupportMessagesPage'
+import VerifyEmailPage from '@/pages/VerifyEmailPage'
 
 export default function App() {
   return (
@@ -31,6 +32,8 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/auth/google/callback" element={<GoogleCallbackPage />} />
         <Route path="/auth/vk/callback" element={<VKCallbackPage />} />
+
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
 
         {/* Admin routes */}
         <Route element={<AdminRoute />}>

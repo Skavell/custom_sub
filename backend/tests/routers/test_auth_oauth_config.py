@@ -45,6 +45,26 @@ async def test_oauth_config_google_enabled():
 
 
 @pytest.mark.asyncio
+async def test_oauth_config_has_email_verification_required():
+    """Response includes email_verification_required field."""
+    with (
+        patch("app.routers.auth.settings") as mock_settings,
+        patch("app.routers.auth.get_setting", new_callable=AsyncMock) as mock_get,
+    ):
+        mock_settings.google_client_id = ""
+        mock_settings.vk_client_id = ""
+        mock_get.return_value = None
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/api/auth/oauth-config")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "email_verification_required" in data
+    assert isinstance(data["email_verification_required"], bool)
+
+
+@pytest.mark.asyncio
 async def test_oauth_config_telegram_enabled_with_username():
     """When telegram_bot_token is in DB and bot_username set, telegram=true with username."""
     async def mock_get(db, key):

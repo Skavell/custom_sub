@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { Check, Tag, Loader2 } from 'lucide-react'
 import { usePlans } from '@/hooks/usePlans'
 import { useSubscription } from '@/hooks/useSubscription'
+import { useAuth } from '@/hooks/useAuth'
 import { api, ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import type {
@@ -12,7 +13,9 @@ import type {
   ApplyPromoRequest,
   ApplyPromoResponse,
   CreatePaymentRequest,
+  OAuthConfigResponse,
 } from '@/types/api'
+import EmailVerificationBanner from '@/components/EmailVerificationBanner'
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -78,6 +81,18 @@ function PlanCard({
 export default function SubscriptionPage() {
   const { data: plans = [], isLoading: plansLoading } = usePlans()
   const { data: sub } = useSubscription()
+  const { user } = useAuth()
+  const { data: oauthConfig } = useQuery<OAuthConfigResponse>({
+    queryKey: ['oauthConfig'],
+    queryFn: () => api.get<OAuthConfigResponse>('/api/auth/oauth-config'),
+    staleTime: 300_000,
+  })
+
+  const showVerifyBanner =
+    user?.email_verified === false &&
+    oauthConfig?.email_verification_required === true
+
+  const emailProvider = user?.providers.find(p => p.type === 'email')
 
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
   const [promoInput, setPromoInput] = useState('')
@@ -167,6 +182,10 @@ export default function SubscriptionPage() {
   return (
     <div className="p-4 md:p-6 max-w-2xl mx-auto">
       <h1 className="text-xl font-bold text-text-primary mb-1">Подписка</h1>
+
+      {showVerifyBanner && emailProvider?.identifier && (
+        <EmailVerificationBanner userEmail={emailProvider.identifier} />
+      )}
       {sub?.status === 'active' && (
         <p className="text-sm text-text-muted mb-5">
           Активна до {formatDate(sub.expires_at)} · {sub.days_remaining} дн. осталось
@@ -286,8 +305,9 @@ export default function SubscriptionPage() {
           )}
           <button
             onClick={handlePay}
-            disabled={payMutation.isPending}
-            className="w-full rounded-input bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-medium py-2.5 text-sm transition-colors flex items-center justify-center gap-2"
+            disabled={payMutation.isPending || showVerifyBanner}
+            title={showVerifyBanner ? 'Сначала подтвердите email' : undefined}
+            className={`w-full rounded-input bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-medium py-2.5 text-sm transition-colors flex items-center justify-center gap-2 ${showVerifyBanner ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {payMutation.isPending ? (
               <><Loader2 size={14} className="animate-spin" /> Подготовка…</>

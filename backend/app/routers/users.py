@@ -28,6 +28,9 @@ async def get_me(
     )
     providers = result.scalars().all()
 
+    email_provider = next((p for p in providers if p.provider == ProviderType.email), None)
+    email_verified = email_provider.email_verified if email_provider else None
+
     def _provider_identifier(p: "AuthProvider") -> str | None:
         if p.provider == ProviderType.email:
             return p.provider_user_id
@@ -44,6 +47,7 @@ async def get_me(
             ProviderInfo(type=p.provider.value, username=p.provider_username, identifier=_provider_identifier(p))
             for p in providers
         ],
+        email_verified=email_verified,
     )
 
 
@@ -207,6 +211,7 @@ async def link_email(
         provider=ProviderType.email,
         provider_user_id=data.email.lower(),
         password_hash=hash_password(data.password),
+        email_verified=False,
     ))
     await db.commit()
     return {"ok": True}

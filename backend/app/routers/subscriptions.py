@@ -85,12 +85,34 @@ async def activate_trial(
             detail="Сервис временно недоступен. Обратитесь в поддержку.",
         )
 
+    # Guard 4: email verification
+    email_verification_enabled = await get_setting(db, "email_verification_enabled")
+    if email_verification_enabled == "true":
+        from sqlalchemy import select as _sel
+        from app.models.auth_provider import AuthProvider, ProviderType
+        ev_result = await db.execute(
+            _sel(AuthProvider).where(
+                AuthProvider.user_id == current_user.id,
+                AuthProvider.provider == ProviderType.email,
+            )
+        )
+        email_provider = ev_result.scalar_one_or_none()
+        if email_provider is not None and not email_provider.email_verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Подтвердите email для активации пробного периода",
+            )
+
     # Fetch trial settings
     trial_days_str = await get_setting(db, "remnawave_trial_days") or "3"
     trial_days = int(trial_days_str)
     trial_traffic_str = await get_setting(db, "remnawave_trial_traffic_limit_bytes") or str(30 * 1024 ** 3)
     trial_traffic_bytes = int(trial_traffic_str)
-    squad_uuids_str = await get_setting(db, "remnawave_squad_uuids") or ""
+    squad_uuids_str = (
+        await get_setting(db, "remnawave_trial_squad_uuids")
+        or await get_setting(db, "remnawave_squad_uuids")
+        or ""
+    )
     squad_ids = [s.strip() for s in squad_uuids_str.split(",") if s.strip()]
 
     # Build Remnawave username
