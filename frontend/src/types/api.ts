@@ -3,6 +3,7 @@
 export interface ProviderInfo {
   type: string
   username: string | null
+  identifier: string | null
 }
 
 export interface UserProfile {

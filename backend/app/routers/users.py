@@ -36,7 +36,7 @@ async def get_me(
         is_admin=current_user.is_admin,
         created_at=current_user.created_at,
         providers=[
-            ProviderInfo(type=p.provider.value, username=p.provider_username)
+            ProviderInfo(type=p.provider.value, username=p.provider_username, identifier=p.provider_user_id)
             for p in providers
         ],
         email_verified=email_verified,

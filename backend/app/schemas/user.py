@@ -5,6 +5,7 @@ from pydantic import BaseModel
 class ProviderInfo(BaseModel):
     type: str
     username: str | None
+    identifier: str | None = None
 
 
 class UserProfileResponse(BaseModel):
