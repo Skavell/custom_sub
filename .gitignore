@@ -29,3 +29,4 @@ redis_data/
 
 # Project specific
 .superpowers/
+.worktrees/
