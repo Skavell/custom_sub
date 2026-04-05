@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { AlertTriangle, Send, CheckCircle } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 
@@ -11,6 +11,12 @@ export default function EmailVerificationBanner({ userEmail }: Props) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [cooldownLeft, setCooldownLeft] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [])
 
   const startCooldown = () => {
     setCooldownLeft(60)
