@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQueryClient, useMutation } from '@tanstack/react-query'
+import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query'
 import { Shield, Zap, Download, RefreshCw, AlertCircle } from 'lucide-react'
 import { useSubscription } from '@/hooks/useSubscription'
+import { useAuth } from '@/hooks/useAuth'
 import { api, ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import type { TrialActivateResponse, SubscriptionResponse } from '@/types/api'
+import type { TrialActivateResponse, SubscriptionResponse, OAuthConfigResponse } from '@/types/api'
+import EmailVerificationBanner from '@/components/EmailVerificationBanner'
 
 function StatusBadge({ status }: { status: string }) {
   const colors = {
@@ -123,7 +125,7 @@ function ExpiredCard() {
   )
 }
 
-function TrialCTA({ onActivate, isLoading, error }: { onActivate: () => void; isLoading: boolean; error: string | null }) {
+function TrialCTA({ onActivate, isLoading, error, showVerifyBanner }: { onActivate: () => void; isLoading: boolean; error: string | null; showVerifyBanner: boolean }) {
   return (
     <div className="rounded-card bg-surface border border-border-accent p-6">
       <div className="mb-4">
@@ -142,8 +144,9 @@ function TrialCTA({ onActivate, isLoading, error }: { onActivate: () => void; is
       )}
       <button
         onClick={onActivate}
-        disabled={isLoading}
-        className="w-full rounded-input bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-medium py-2.5 text-sm transition-colors flex items-center justify-center gap-2"
+        disabled={isLoading || showVerifyBanner}
+        title={showVerifyBanner ? 'Сначала подтвердите email' : undefined}
+        className={`w-full rounded-input bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-medium py-2.5 text-sm transition-colors flex items-center justify-center gap-2 ${showVerifyBanner ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
         {isLoading ? (
           <><RefreshCw size={14} className="animate-spin" /> Активация…</>
@@ -158,7 +161,19 @@ function TrialCTA({ onActivate, isLoading, error }: { onActivate: () => void; is
 export default function HomePage() {
   const queryClient = useQueryClient()
   const { data: sub, isLoading } = useSubscription()
+  const { user } = useAuth()
+  const { data: oauthConfig } = useQuery<OAuthConfigResponse>({
+    queryKey: ['oauthConfig'],
+    queryFn: () => api.get<OAuthConfigResponse>('/api/auth/oauth-config'),
+    staleTime: 300_000,
+  })
   const [trialError, setTrialError] = useState<string | null>(null)
+
+  const showVerifyBanner =
+    user?.email_verified === false &&
+    oauthConfig?.email_verification_required === true
+
+  const emailProvider = user?.providers.find(p => p.type === 'email')
 
   const trialMutation = useMutation({
     mutationFn: () => api.post<TrialActivateResponse>('/api/subscriptions/trial'),
@@ -184,12 +199,17 @@ export default function HomePage() {
     <div className="p-4 md:p-6 max-w-xl mx-auto">
       <h1 className="text-xl font-bold text-text-primary mb-5">Главная</h1>
 
+      {showVerifyBanner && emailProvider?.identifier && (
+        <EmailVerificationBanner userEmail={emailProvider.identifier} />
+      )}
+
       {/* Subscription block */}
       {sub === null || sub === undefined ? (
         <TrialCTA
           onActivate={() => trialMutation.mutate()}
           isLoading={trialMutation.isPending}
           error={trialError}
+          showVerifyBanner={showVerifyBanner ?? false}
         />
       ) : sub.status === 'active' && sub.type === 'trial' ? (
         <TrialCard sub={sub} />
