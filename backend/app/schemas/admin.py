@@ -9,6 +9,7 @@ class ProviderInfo(BaseModel):
     provider: str
     provider_user_id: str
     provider_username: str | None
+    email_verified: bool | None = None
     created_at: datetime
     model_config = {"from_attributes": True}
 
@@ -40,6 +41,7 @@ class UserAdminListItem(BaseModel):
     display_name: str
     avatar_url: str | None
     is_admin: bool
+    is_banned: bool = False
     remnawave_uuid: uuid.UUID | None
     has_made_payment: bool
     subscription_conflict: bool
@@ -49,6 +51,8 @@ class UserAdminListItem(BaseModel):
     subscription_type: str | None
     subscription_expires_at: datetime | None
     providers: list[str]
+    email: str | None = None
+    email_verified: bool | None = None
 
 
 class UserAdminDetail(BaseModel):
@@ -56,6 +60,7 @@ class UserAdminDetail(BaseModel):
     display_name: str
     avatar_url: str | None
     is_admin: bool
+    is_banned: bool = False
     remnawave_uuid: uuid.UUID | None
     has_made_payment: bool
     subscription_conflict: bool
@@ -64,6 +69,8 @@ class UserAdminDetail(BaseModel):
     subscription: SubscriptionAdminInfo | None
     providers: list[ProviderInfo]
     recent_transactions: list[TransactionAdminItem]
+    email: str | None = None
+    email_verified: bool | None = None
 
 
 class ConflictResolveRequest(BaseModel):

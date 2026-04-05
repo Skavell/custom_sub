@@ -55,11 +55,13 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 def _build_list_item(u: User) -> UserAdminListItem:
     sub = u.subscription
+    email_provider = next((p for p in u.auth_providers if p.provider.value == "email"), None)
     return UserAdminListItem(
         id=u.id,
         display_name=u.display_name,
         avatar_url=u.avatar_url,
         is_admin=u.is_admin,
+        is_banned=u.is_banned,
         remnawave_uuid=u.remnawave_uuid,
         has_made_payment=u.has_made_payment,
         subscription_conflict=u.subscription_conflict,
@@ -69,6 +71,8 @@ def _build_list_item(u: User) -> UserAdminListItem:
         subscription_type=sub.type.value if sub else None,
         subscription_expires_at=sub.expires_at if sub else None,
         providers=[p.provider.value for p in u.auth_providers],
+        email=email_provider.provider_user_id if email_provider else None,
+        email_verified=email_provider.email_verified if email_provider else None,
     )
 
 
@@ -132,14 +136,26 @@ async def get_user_detail(
         display_name=user.display_name,
         avatar_url=user.avatar_url,
         is_admin=user.is_admin,
+        is_banned=user.is_banned,
         remnawave_uuid=user.remnawave_uuid,
         has_made_payment=user.has_made_payment,
         subscription_conflict=user.subscription_conflict,
         created_at=user.created_at,
         last_seen_at=user.last_seen_at,
         subscription=SubscriptionAdminInfo.model_validate(user.subscription) if user.subscription else None,
-        providers=[ProviderInfo.model_validate(p) for p in user.auth_providers],
+        providers=[
+            ProviderInfo(
+                provider=p.provider.value,
+                provider_user_id=p.provider_user_id,
+                provider_username=p.provider_username,
+                email_verified=p.email_verified if p.provider.value == "email" else None,
+                created_at=p.created_at,
+            )
+            for p in user.auth_providers
+        ],
         recent_transactions=[TransactionAdminItem.model_validate(tx) for tx in transactions],
+        email=next((p.provider_user_id for p in user.auth_providers if p.provider.value == "email"), None),
+        email_verified=next((p.email_verified for p in user.auth_providers if p.provider.value == "email"), None),
     )
 
 
