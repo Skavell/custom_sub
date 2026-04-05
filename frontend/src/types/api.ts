@@ -11,6 +11,7 @@ export interface UserProfile {
   is_admin: boolean
   created_at: string
   providers: ProviderInfo[]
+  email_verified: boolean | null   // null = no email provider
 }
 
 export interface Plan {
@@ -124,18 +125,27 @@ export interface AdminProviderInfo {
   provider: string
   provider_user_id: string
   provider_username: string | null
+  email_verified: boolean | null   // null for OAuth providers
   created_at: string
 }
 
 export interface UserAdminListItem {
   id: string
   display_name: string
+  avatar_url: string | null
+  is_admin: boolean
+  is_banned: boolean
+  email: string | null
+  email_verified: boolean | null
   providers: string[]           // list of provider type strings e.g. ["telegram"]
   subscription_status: string | null
+  subscription_type: string | null
   subscription_expires_at: string | null
   remnawave_uuid: string | null
   subscription_conflict: boolean
+  has_made_payment: boolean
   created_at: string
+  last_seen_at: string
 }
 
 export interface PaginatedUsers {
@@ -170,6 +180,9 @@ export interface UserAdminDetail {
   display_name: string
   avatar_url: string | null
   is_admin: boolean
+  is_banned: boolean
+  email: string | null
+  email_verified: boolean | null
   has_made_payment: boolean
   subscription_conflict: boolean
   remnawave_uuid: string | null
@@ -288,9 +301,14 @@ export interface SupportMessageAdminItem {
 
 export interface OAuthConfigResponse {
   google: boolean
+  google_client_id: string | null
   vk: boolean
+  vk_client_id: string | null
   telegram: boolean
   telegram_bot_username: string | null
+  email_enabled: boolean
+  support_telegram_url: string | null
+  email_verification_required: boolean
 }
 
 export interface OsAppConfig {
