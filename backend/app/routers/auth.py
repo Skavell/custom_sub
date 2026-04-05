@@ -97,6 +97,19 @@ async def register_email(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    # Guard 1: registration enabled
+    registration_enabled = await get_setting(db, "registration_enabled")
+    if registration_enabled == "false":
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Регистрация временно закрыта")
+
+    # Guard 2: domain whitelist
+    allowed_domains_str = await get_setting(db, "allowed_email_domains") or ""
+    allowed_domains = [d.strip().lower() for d in allowed_domains_str.split(",") if d.strip()]
+    if allowed_domains:
+        email_domain = data.email.lower().split("@")[-1]
+        if email_domain not in allowed_domains:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Регистрация с этим email-адресом недоступна")
+
     existing, _ = await get_user_by_email(db, data.email)
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
