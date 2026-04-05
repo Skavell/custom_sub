@@ -18,13 +18,17 @@ Three features are added together because they share schema changes and are need
 
 ## 2. Database Migrations
 
-Two new columns added via Alembic migrations (extending existing chain ending at `1e776950ed0d`):
+Two new columns added via Alembic migrations (extending existing chain ending at `1e776950ed0d`).
+
+**Critical:** The `User` model and `AuthProvider` model must have the new columns added before the application restarts. Migrations must run before the new application code starts (Alembic auto-runs on startup per existing Dockerfile CMD).
 
 ### Migration A — `auth_providers.email_verified`
 ```sql
 ALTER TABLE auth_providers ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT FALSE;
 ```
-Semantics: only meaningful for `email` provider rows. OAuth providers (google, vk, telegram) are always considered verified (email identity confirmed by the OAuth provider).
+Semantics: only meaningful for `email` provider rows. OAuth providers (google, vk, telegram) are always considered verified — email identity is confirmed by the OAuth provider.
+
+When a user links email via `POST /api/users/me/providers/email`, the new `AuthProvider` row is also created with `email_verified=False`. The same verification flow applies to this path.
 
 ### Migration B — `users.is_banned`
 ```sql
@@ -56,37 +60,38 @@ The existing `remnawave_squad_uuids` key is left untouched. The trial activation
 Two new checks before user creation:
 
 1. **Registration enabled:** read `registration_enabled` setting; if `"false"` → HTTP 503 `"Регистрация временно закрыта"`
-2. **Email domain whitelist:** read `allowed_email_domains` setting; split by comma; if email domain not in list → HTTP 400 `"Регистрация с этим email-адресом недоступна"`
-
-Both settings default to permissive values so existing behavior is unchanged until admin configures them.
+2. **Email domain whitelist:** read `allowed_email_domains` setting; split by comma; trim whitespace on each part; filter empty strings.
+   - If the setting is absent or results in an empty list → **skip check** (open to all domains).
+   - If non-empty → check email domain against the list → HTTP 400 `"Регистрация с этим email-адресом недоступна"` if not found.
 
 ### 3.2 Email verification service (`app/services/email_service.py`)
 
-Sends transactional email via Resend REST API (`POST https://api.resend.com/emails`). Uses `httpx.AsyncClient`. Settings read: `resend_api_key`, `email_from_address`, `email_from_name`.
+Sends transactional email via Resend REST API (`POST https://api.resend.com/emails`). Uses `httpx.AsyncClient`. Reads `resend_api_key` via `get_setting_decrypted`, `email_from_address` and `email_from_name` via `get_setting`.
 
 If `resend_api_key` is not configured → raises `RuntimeError` (caller handles as 503).
 
 ### 3.3 Verification endpoints (added to `app/routers/auth.py`)
 
-**`POST /api/auth/verify-email/send`** (requires auth)
-- Check user has an email provider with `email_verified=False`; if already verified → 200 no-op
+**`POST /api/auth/verify-email/send`** (requires auth via `get_current_user`)
+- Check user has an email provider with `email_verified=False`; if already verified → 200 no-op `{"ok": true}`
 - Check `resend_api_key` configured → 503 if not
-- Rate limit: 3 sends per hour per user (Redis key `verify_email_rate:{user_id}`)
-- Generate `uuid4()` token → store in Redis: `verify_email:{token}` = `user_id`, TTL 86400s (24h)
+- Rate limit: 3 sends per hour per user. Redis key: `verify_email_rate:{user_id}`, TTL 3600s. Uses existing `check_rate_limit` pattern.
+- Generate `uuid4()` token → store in Redis: `verify_email:{token}` = `str(user_id)`, TTL 86400s (24h)
 - Send email with link `{FRONTEND_URL}/verify-email?token={token}`
 - Return `{"ok": true}`
 
 **`GET /api/auth/verify-email/confirm`** (public, query param `token`)
-- Look up `verify_email:{token}` in Redis → 400 if not found/expired
-- Set `auth_providers.email_verified = True` for this user's email provider
-- Delete Redis key
-- Redirect (HTTP 302) to `{FRONTEND_URL}/verify-email?verified=1`
+- Look up `verify_email:{token}` in Redis
+  - If not found or expired → HTTP 302 redirect to `{FRONTEND_URL}/verify-email?error=expired`
+  - If found → set `auth_providers.email_verified = True` for this user's email provider, delete Redis key → HTTP 302 redirect to `{FRONTEND_URL}/verify-email?verified=1`
+- Note: if the user clicks the link a second time after the token has already been consumed, the token no longer exists in Redis → they receive `?error=expired`. This is acceptable — the user is already verified.
 
 ### 3.4 Trial activation guard (update `POST /api/subscriptions/trial`)
 
 After existing guards, add:
 - Read `email_verification_enabled` setting
-- If `"true"`: check if user has email provider with `email_verified=False` → HTTP 403 `"Подтвердите email для активации пробного периода"`
+- If `"true"`: query whether the user has an `AuthProvider` with `provider == email` AND `email_verified == False` → if yes, HTTP 403 `"Подтвердите email для активации пробного периода"`
+- Users with no email provider at all (OAuth-only: Telegram, Google, VK) are **exempt** — verification is not required for them. The guard only applies to users who registered or linked an email address.
 
 ### 3.5 Trial squad fallback (update `POST /api/subscriptions/trial`)
 
@@ -99,45 +104,77 @@ squad_uuids_str = (
 )
 ```
 
-### 3.6 Ban enforcement (update `app/deps.py` — `get_current_user`)
+### 3.6 Ban enforcement — two places
 
-After loading user from DB, check `user.is_banned` → raise HTTP 403 `"Аккаунт заблокирован"` if True.
+1. **`app/deps.py` — `get_current_user`:** after loading user from DB, check `user.is_banned` → raise HTTP 403 `"Аккаунт заблокирован"` if True.
+2. **`POST /api/auth/refresh` handler:** after loading user from DB (the handler already does `select(User)` explicitly), check `user.is_banned` → raise HTTP 403 `"Аккаунт заблокирован"` if True. This prevents a banned user with a valid refresh token from obtaining a new access token.
 
-### 3.7 Admin schema extensions
+### 3.7 OAuthConfigResponse extension (`app/schemas/auth.py` + `get_oauth_config` handler)
+
+Add `email_verification_required: bool` to the `OAuthConfigResponse` Pydantic model.
+
+In the `get_oauth_config` handler (`app/routers/auth.py`), add:
+```python
+email_verification_required = await get_setting(db, "email_verification_enabled") == "true"
+```
+Include in the returned `OAuthConfigResponse`. Field is always present — no optional.
+
+### 3.8 UserProfileResponse extension (`app/schemas/user.py` + `/api/users/me` handler)
+
+Add `email_verified: bool | None` to `UserProfileResponse`.
+
+Derivation rule:
+- Load `AuthProvider` rows for the user (already done in the handler)
+- Find the row where `provider == ProviderType.email`
+- If found: `email_verified = provider.email_verified`
+- If not found (no email provider): `email_verified = None`
+
+`None` semantics: user has no email address linked → verification is not applicable → banner should not show → trial is not blocked.
+
+### 3.9 Admin schema extensions
+
+All changes to `app/schemas/admin.py`:
+
+**`ProviderInfo`** (detail view only) gains:
+- `provider_user_id: str` — raw provider user ID (telegram numeric ID, Google subject, email address). Populated from `AuthProvider.provider_user_id`.
+- `email_verified: bool | None` — `AuthProvider.email_verified` for email provider; `None` for OAuth providers.
 
 **`UserAdminDetail`** gains:
 - `is_banned: bool`
-- `email: str | None` — provider_user_id of email provider (for quick display)
-- `email_verified: bool | None` — email_verified from email provider
-- `providers` items gain: `provider_user_id: str` (so telegram_id is visible)
+- `email: str | None` — `provider_user_id` from the email-type `AuthProvider`, or `None` if no email provider
+- `email_verified: bool | None` — `email_verified` from the email-type `AuthProvider`, or `None` if no email provider
 
 **`UserAdminListItem`** gains:
 - `is_banned: bool`
-- `email: str | None`
+- `email: str | None` — same derivation as above (top-level field, `providers` stays as `list[str]`)
+- `email_verified: bool | None` — same derivation as above (top-level field)
 
-### 3.8 New admin endpoints
+`_build_list_item` helper in `app/routers/admin.py` must be updated to populate these three new fields. Requires `selectinload(User.auth_providers)` (already present in the list query).
+
+### 3.10 New admin endpoints (`app/routers/admin.py`)
 
 All require `require_admin` dependency.
 
 **`PATCH /api/admin/users/{user_id}/ban`**
+- Load user → 404 if not found
+- Cannot ban yourself → 403
 - Toggle `user.is_banned`
-- Cannot ban yourself (403)
-- Returns updated `UserAdminDetail`
+- Commit + refresh
+- Return updated `UserAdminDetail` (build with full selectinload)
 
 **`PATCH /api/admin/users/{user_id}/admin`**
+- Load user → 404 if not found
+- Cannot remove own admin → 403
 - Toggle `user.is_admin`
-- Cannot remove own admin (403)
-- Returns updated `UserAdminDetail`
+- Commit + refresh
+- Return updated `UserAdminDetail`
 
 **`POST /api/admin/users/{user_id}/reset-subscription`**
-- Load subscription; if none → 404
-- Set `sub.status = expired`, `sub.expires_at = now()`
-- Does NOT touch Remnawave (admin should manually sync after if needed)
-- Returns `{"ok": true}`
-
-### 3.9 OAuthConfigResponse extension
-
-Add `email_verification_required: bool` field so frontend knows whether to show the verification banner. Computed as: `email_verification_enabled == "true"`.
+- Load subscription → 404 if none
+- Set `sub.status = SubscriptionStatus.expired`, `sub.expires_at = now()`
+- Commit
+- Does NOT call Remnawave API. Local emergency action. Admin uses existing "Sync" button afterward to reconcile.
+- Return `{"ok": true}`
 
 ---
 
@@ -145,34 +182,38 @@ Add `email_verification_required: bool` field so frontend knows whether to show 
 
 ### 4.1 New page: `/verify-email`
 
-Standalone page (no Layout, no auth required). Reads `?token` or `?verified` from URL:
+Standalone page (no Layout, no auth required). Reads `?verified` or `?error` from URL:
 
-- If `?token=...`: on mount, POST `/api/auth/verify-email/confirm?token=...`
-  - Success: show "Email подтверждён ✓" + button "Перейти к подписке" → `/subscription`
-  - Error: show "Ссылка устарела или недействительна" + button "Войти"
-- If `?verified=1`: show success state immediately (server already confirmed via redirect)
-- If neither: show "Неверная ссылка"
+- `?verified=1` → show "Email подтверждён ✓" + button "Перейти к подписке" → `/subscription`
+- `?error=expired` → show "Ссылка устарела или недействительна" + button "На главную" → `/`
+- Neither → show "Неверная ссылка"
 
-### 4.2 Verification banner (shared component)
+Note: this page only displays server redirect results. It does not POST anything. Sending verification email is done via the `EmailVerificationBanner` on authenticated pages.
 
-New component `EmailVerificationBanner` — shown on `/` (HomePage) and `/subscription` pages.
+### 4.2 Verification banner (shared component `EmailVerificationBanner`)
 
-Display condition: user has email provider AND `email_verification_required=true` from OAuthConfig AND email is not verified (needs new field `email_verified` in `UserProfileResponse`).
+Shown on `/` (HomePage) and `/subscription` (SubscriptionPage).
 
-Add `email_verified: bool | None` to `UserProfileResponse` (from `/api/users/me`). Backend: derived from email provider's `email_verified` field.
+Display condition: `user.email_verified === false` AND `oauthConfig.email_verification_required === true`.
+
+- `user.email_verified` comes from `['me']` TanStack Query key (`UserProfileResponse.email_verified`)
+- `oauthConfig.email_verification_required` comes from a new `['oauthConfig']` TanStack Query key (`GET /api/auth/oauth-config`)
+- `user.email_verified === null` (no email provider, OAuth-only user) → banner does NOT show
 
 Banner content:
 ```
-⚠ Подтвердите email — [resend button]  "Письмо отправлено!" flash on success
+⚠ Подтвердите email чтобы активировать пробный период  [Отправить письмо]
 ```
 
-Resend button: POST `/api/auth/verify-email/send`, shows spinner, then success/error message. Disabled for 60s after send to prevent spam clicking.
+Resend button: `POST /api/auth/verify-email/send`, spinner during request. On success: show "Письмо отправлено" flash, disable button for 60s (client-side timer — resets on reload, backend rate limit is the actual enforcement). On error: show error message.
 
 ### 4.3 Trial button guard (update `SubscriptionPage`)
 
-If banner is visible (email not verified + verification required): disable "Активировать пробный период" button with tooltip "Сначала подтвердите email".
+If banner is visible: disable "Активировать пробный период" button with tooltip "Сначала подтвердите email".
 
 ### 4.4 Admin user detail page (`/admin/users/:id`) — full redesign
+
+Update `UserAdminDetail` type in `src/types/api.ts` to include `is_banned`, `email`, `email_verified`, and updated `ProviderInfo` with `provider_user_id` and `email_verified`.
 
 **Info section** (read-only grid):
 
@@ -181,12 +222,12 @@ If banner is visible (email not verified + verification required): disable "Ак
 | ID | UUID |
 | Имя | display_name |
 | Email | email or "—" + ✓/✗ verified badge |
-| Провайдеры | icon + identifier + provider_user_id (telegram_id visible) |
+| Провайдеры | icon + identifier + provider_user_id (raw, for telegram_id) |
 | Статус | Active / Banned badge |
 | Права | Admin / User badge |
 | Создан | created_at |
 | Последний вход | last_seen_at |
-| Подписка | type + status + expires_at + traffic |
+| Подписка | type + status + expires_at + traffic_limit_gb |
 | Remnawave UUID | uuid or "—" |
 
 **Actions section** (with confirmation dialogs):
@@ -194,84 +235,145 @@ If banner is visible (email not verified + verification required): disable "Ак
 | Action | Confirm text |
 |--------|-------------|
 | Заблокировать / Разблокировать | "Заблокировать пользователя {name}?" |
-| Выдать / Забрать права админа | "Сделать {name} администратором?" |
-| Сбросить подписку | "Сброс подписки пользователя {name}. Это действие необратимо." |
+| Выдать / Забрать права админа | "Сделать {name} администратором?" / "Забрать права админа у {name}?" |
+| Сбросить подписку | "Локальный сброс подписки — Remnawave не затронут. Продолжить?" |
 | Синхронизировать с Remnawave | (already exists) |
 | Разрешить конфликт UUID | (already exists) |
 
-All action mutations invalidate `['admin', 'user', id]` query key.
+Mutations:
+- Ban/admin: server returns updated `UserAdminDetail` → update `['admin-user', id]` query cache directly (matches the existing `queryKey` used by the detail page query)
+- Reset-subscription: server returns `{"ok": true}` → invalidate `['admin-user', id]` query key to trigger refetch
+- Also invalidate `['sync', 'users']` and existing sync mutation keys if present, for consistency
 
 ### 4.5 Admin settings page (`/admin/settings`) — new sections
 
-Replace current generic key-value list with grouped sections. Each section has a header and human-readable field labels. Existing save-per-key mechanic is kept.
+The existing `AdminSettingsPage.tsx` groups settings by explicit key sets (e.g. `OAUTH_KEYS`). Keys not in any explicit set fall through to the generic "Основные" bucket which renders plain `<input type="text">` — all new keys must be explicitly assigned to avoid this fallback.
 
-**Sections:**
+Add the following new named key sets (alongside the existing `OAUTH_KEYS`):
 
-**Remnawave**
-- URL сервера (`remnawave_url`) — text input
-- API токен (`remnawave_token`) — masked secret input
-- Squad UUID для триала (`remnawave_trial_squad_uuids`) — text input, hint: "UUID через запятую"
-- Squad UUID для платной подписки (`remnawave_paid_squad_uuids`) — text input
+```ts
+const REMNAWAVE_KEYS = new Set(['remnawave_url', 'remnawave_token', 'remnawave_trial_squad_uuids', 'remnawave_paid_squad_uuids']);
+const TRIAL_KEYS = new Set(['remnawave_trial_days', 'remnawave_trial_traffic_limit_bytes']);
+const EMAIL_SERVICE_KEYS = new Set(['resend_api_key', 'email_from_address', 'email_from_name']);
+const REGISTRATION_KEYS = new Set(['registration_enabled', 'email_verification_enabled', 'allowed_email_domains']);
+```
 
-**Пробный период**
-- Длительность (дней) (`remnawave_trial_days`) — number input
-- Лимит трафика (ГБ) (`remnawave_trial_traffic_limit_bytes`) — number input showing GB (stored as bytes: value × 1024³)
+`REGISTRATION_KEYS` entries use dedicated UI components: `registration_enabled` and `email_verification_enabled` render as toggle switches; `allowed_email_domains` renders as a textarea.
 
-**Email-сервис (Resend)**
-- API ключ (`resend_api_key`) — masked secret input
-- Адрес отправителя (`email_from_address`) — text input, e.g. `noreply@yourdomain.com`
-- Имя отправителя (`email_from_name`) — text input, e.g. `VPN Service`
+**Section layout:**
 
-**Регистрация**
-- Регистрация открыта (`registration_enabled`) — toggle switch (stored as `"true"`/`"false"`)
-- Подтверждение email (`email_verification_enabled`) — toggle switch
-- Разрешённые домены (`allowed_email_domains`) — textarea, one domain per line in UI (stored as comma-separated)
+| Section | Keys |
+|---------|------|
+| **Remnawave** | `remnawave_url`, `remnawave_token`, `remnawave_trial_squad_uuids` (hint: fallback to legacy key if empty), `remnawave_paid_squad_uuids` |
+| **Пробный период** | `remnawave_trial_days`, `remnawave_trial_traffic_limit_bytes` |
+| **Email-сервис (Resend)** | `resend_api_key`, `email_from_address`, `email_from_name` |
+| **Регистрация** | `registration_enabled`, `email_verification_enabled`, `allowed_email_domains` |
+| **OAuth** | existing, no changes |
+| **Прочее** | existing, no changes |
 
-**OAuth** — already exists, no changes
-
-**Прочее** — already exists, no changes
+**Special UI for specific keys:**
+- `registration_enabled`, `email_verification_enabled` → toggle switch (value `"true"`/`"false"`)
+- `allowed_email_domains` → textarea; UI displays one domain per line; on save, join lines with `,` (strip whitespace, filter empty lines) before sending to API; on load, split by `,` and join with `\n` for display
+- `remnawave_trial_traffic_limit_bytes` → number input showing GB; on load divide by `1024³` (round to nearest integer); on save multiply by `1024³`
+- `remnawave_token`, `resend_api_key` → masked secret inputs (already handled by `is_sensitive` flag)
 
 ---
 
 ## 5. Data Flow Summary
 
 ```
-Registration:
-  POST /register → check registration_enabled → check domain whitelist → create user (email_verified=false)
+Registration (email):
+  POST /register
+    → check registration_enabled (503 if false)
+    → check domain whitelist (skip if setting empty; 400 if domain not in list)
+    → create user, create AuthProvider(email_verified=False)
 
-Verification:
-  POST /verify-email/send → Redis token → Resend email → link → GET /verify-email/confirm → email_verified=true
+Link email via profile:
+  POST /users/me/providers/email
+    → create AuthProvider(email_verified=False)
+    → verification banner appears on next page load
+
+Email verification:
+  POST /verify-email/send (auth)
+    → rate limit 3/hr (Redis verify_email_rate:{user_id})
+    → store token in Redis verify_email:{token} TTL 24h
+    → send email via Resend
+  GET /verify-email/confirm?token=
+    → found → email_verified=True, delete token → 302 /verify-email?verified=1
+    → not found → 302 /verify-email?error=expired
 
 Trial activation:
-  POST /subscriptions/trial → check email_verified (if required) → create Remnawave user with trial squad → create local sub
+  POST /subscriptions/trial
+    → existing guards (already activated, rate limit, Remnawave not configured)
+    → if email_verification_enabled=true AND user has email provider with email_verified=False → 403
+    → create Remnawave user with remnawave_trial_squad_uuids (fallback to remnawave_squad_uuids)
+    → create local subscription
+
+Ban:
+  PATCH /admin/users/:id/ban → toggle is_banned
+  → get_current_user dep: 403 for banned users on all protected endpoints
+  → POST /auth/refresh: 403 for banned users (prevents token refresh)
 
 Admin actions:
-  PATCH /admin/users/:id/ban → toggle is_banned → get_current_user returns 403 for banned users
-  PATCH /admin/users/:id/admin → toggle is_admin
-  POST /admin/users/:id/reset-subscription → mark sub expired
+  PATCH /admin/users/:id/admin → toggle is_admin (returns UserAdminDetail)
+  POST /admin/users/:id/reset-subscription → local sub expired (returns {"ok":true})
 ```
 
 ---
 
 ## 6. Error Cases
 
-| Scenario | Response |
-|----------|----------|
-| Email domain not in whitelist | 400 "Регистрация с этим email-адресом недоступна" |
-| Registration disabled | 503 "Регистрация временно закрыта" |
-| Verify email: token expired | 400 "Ссылка устарела" |
-| Verify email: resend_api_key not set | 503 |
-| Trial: email not verified | 403 "Подтвердите email для активации" |
-| Banned user login | 403 "Аккаунт заблокирован" |
-| Admin removes own admin | 403 |
-| Admin bans self | 403 |
+| Scenario | HTTP | Message |
+|----------|------|---------|
+| Email domain not in whitelist | 400 | "Регистрация с этим email-адресом недоступна" |
+| Registration disabled | 503 | "Регистрация временно закрыта" |
+| Verify send: resend_api_key not set | 503 | — |
+| Verify send: rate limit exceeded | 429 | — |
+| Verify confirm: token expired/not found | 302 | → `/verify-email?error=expired` |
+| Verify confirm: success | 302 | → `/verify-email?verified=1` |
+| Trial: email not verified | 403 | "Подтвердите email для активации пробного периода" |
+| Login/any endpoint: banned user (access token) | 403 | "Аккаунт заблокирован" |
+| Refresh: banned user | 403 | "Аккаунт заблокирован" |
+| Admin removes own admin | 403 | — |
+| Admin bans self | 403 | — |
+| Reset subscription: no subscription | 404 | — |
 
 ---
 
 ## 7. Deployment Checklist (first deploy)
 
-1. Set `remnawave_url` and `remnawave_token` in admin settings
-2. Set `remnawave_trial_squad_uuids` (copy from old `remnawave_squad_uuids` if set)
-3. Set `resend_api_key`, `email_from_address`, `email_from_name` if email verification is needed
-4. Register first user → set `is_admin=true` via psql → enable `email_verification_enabled` in admin
-5. Set `registration_enabled=true` to open for users
+1. **Run migrations first** — `alembic upgrade head` (adds `email_verified`, `is_banned`, seeds new settings). Happens automatically on container start before app code runs.
+2. Start application — new columns exist before any code reads `user.is_banned` or `provider.email_verified`.
+3. Set `remnawave_url` and `remnawave_token` in admin settings.
+4. Set `remnawave_trial_squad_uuids` (or leave empty to fall back to existing `remnawave_squad_uuids`).
+5. Register first user → `UPDATE users SET is_admin=true WHERE ...` via psql → manage everything else from admin panel.
+6. Configure `resend_api_key`, `email_from_address`, `email_from_name` when ready. Only then enable `email_verification_enabled` in admin settings.
+7. `registration_enabled=true` is the default — no action needed to open registration.
+
+---
+
+## 8. Files to Modify
+
+**Backend:**
+- `app/models/user.py` — add `is_banned` column
+- `app/models/auth_provider.py` — add `email_verified` column
+- `app/schemas/auth.py` — add `email_verification_required` to `OAuthConfigResponse`
+- `app/schemas/user.py` — add `email_verified` to `UserProfileResponse`
+- `app/schemas/admin.py` — add fields to `ProviderInfo`, `UserAdminDetail`, `UserAdminListItem`
+- `app/routers/auth.py` — update `get_oauth_config`, add verify-email endpoints, update `register_email`, update `refresh` ban check
+- `app/routers/users.py` — update `get_me`, update `link_email`
+- `app/routers/subscriptions.py` — update `activate_trial` (email guard + squad fallback)
+- `app/routers/admin.py` — update `_build_list_item`, `get_user_detail`, add ban/admin/reset endpoints
+- `app/deps.py` — add ban check in `get_current_user`
+- `app/services/email_service.py` — **new file**
+- `alembic/versions/` — **3 new migrations**
+
+**Frontend:**
+- `src/types/api.ts` — add fields to `OAuthConfigResponse`, `UserProfileResponse`, `UserAdminListItem`, `UserAdminDetail`, `ProviderInfo`
+- `src/pages/VerifyEmailPage.tsx` — **new file**
+- `src/components/EmailVerificationBanner.tsx` — **new file**
+- `src/pages/HomePage.tsx` — add banner
+- `src/pages/SubscriptionPage.tsx` — add banner + trial button guard
+- `src/pages/admin/AdminUserDetailPage.tsx` — full redesign
+- `src/pages/admin/AdminSettingsPage.tsx` — new sections
+- `src/App.tsx` (or router file) — add `/verify-email` route
