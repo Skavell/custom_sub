@@ -7,6 +7,7 @@ from pydantic import BaseModel
 class CreatePaymentRequest(BaseModel):
     plan_id: uuid.UUID
     promo_code: str | None = None  # discount_percent only; bonus_days handled in Plan 4
+    provider: str = "cryptobot"
 
 
 class PaymentResponse(BaseModel):
@@ -44,3 +45,9 @@ class CryptoBotWebhookPayload(BaseModel):
 
     payload: Invoice
     model_config = {"extra": "allow"}
+
+
+class PaymentProviderInfo(BaseModel):
+    name: str
+    label: str
+    is_active: bool
