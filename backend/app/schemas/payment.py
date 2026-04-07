@@ -7,7 +7,7 @@ from pydantic import BaseModel
 class CreatePaymentRequest(BaseModel):
     plan_id: uuid.UUID
     promo_code: str | None = None  # discount_percent only; bonus_days handled in Plan 4
-    provider: str = "cryptobot"
+    provider: str = "cryptobot"  # passed to get_active_provider() in payments router
 
 
 class PaymentResponse(BaseModel):
