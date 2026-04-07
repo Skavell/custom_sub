@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Check, Tag, Loader2 } from 'lucide-react'
 import { usePlans } from '@/hooks/usePlans'
@@ -14,6 +14,7 @@ import type {
   ApplyPromoResponse,
   CreatePaymentRequest,
   OAuthConfigResponse,
+  PaymentProviderInfo,
 } from '@/types/api'
 import EmailVerificationBanner from '@/components/EmailVerificationBanner'
 
@@ -88,6 +89,25 @@ export default function SubscriptionPage() {
     staleTime: 300_000,
   })
 
+  const { data: providers = [], isLoading: providersLoading, isError: providersError } = useQuery<PaymentProviderInfo[]>({
+    queryKey: ['payment-providers'],
+    queryFn: () => api.get<PaymentProviderInfo[]>('/api/payments/providers'),
+  })
+
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
+
+  const activeProviders = providers.filter(p => p.is_active)
+
+  // Sync selectedProvider when providers list changes.
+  // Only resets if no selection yet, or current selection no longer active.
+  // Preserves user's manual choice on background refetches.
+  useEffect(() => {
+    const stillValid = selectedProvider !== null && activeProviders.some(p => p.name === selectedProvider)
+    if (!stillValid) {
+      setSelectedProvider(activeProviders[0]?.name ?? null)
+    }
+  }, [providers]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const showVerifyBanner =
     user?.email_verified === false &&
     oauthConfig?.email_verification_required === true
@@ -101,7 +121,7 @@ export default function SubscriptionPage() {
   const [promoValidating, setPromoValidating] = useState(false)
 
   const selectedPlan = plans.find((p) => p.id === selectedPlanId) ?? null
-  const isNewUser = sub === null || sub === undefined
+  const isNewUser = user?.has_made_payment === false
 
   const basePrice = selectedPlan?.price_rub ?? 0
   const newUserPrice =
@@ -163,9 +183,11 @@ export default function SubscriptionPage() {
 
   function handlePay() {
     if (!selectedPlanId) return
+    if (!selectedProvider) return  // hard guard — button should already be disabled
     payMutation.mutate({
       plan_id: selectedPlanId,
       promo_code: validatedPromo?.code ?? null,
+      provider: selectedProvider,
     })
   }
 
@@ -191,7 +213,7 @@ export default function SubscriptionPage() {
           Активна до {formatDate(sub.expires_at)} · {sub.days_remaining} дн. осталось
         </p>
       )}
-      {!sub && (
+      {isNewUser && (
         <p className="text-sm text-emerald-400 mb-5">Скидка для новых пользователей на 1 месяц</p>
       )}
 
@@ -240,7 +262,7 @@ export default function SubscriptionPage() {
                 ? `Скидка ${validatedPromo.value}% — выберите тариф для оплаты`
                 : `Бонус ${validatedPromo.value} дн. — выберите тариф или активируйте без оплаты`}
             </p>
-            {validatedPromo.type === 'bonus_days' && !selectedPlanId && (
+            {validatedPromo.type === 'bonus_days' && (
               <button
                 onClick={() => applyBonusMutation.mutate({ code: validatedPromo.code })}
                 disabled={applyBonusMutation.isPending}
@@ -298,6 +320,27 @@ export default function SubscriptionPage() {
             )}
           </div>
           <p className="text-xs text-text-muted mb-3">Подписка продлится, а не начнётся заново</p>
+          {/* Provider selector */}
+          {providersError && (
+            <p className="mb-3 text-xs text-red-400">Не удалось загрузить платёжные системы</p>
+          )}
+          {!providersLoading && !providersError && activeProviders.length === 0 && (
+            <p className="mb-3 text-xs text-text-muted">Оплата временно недоступна</p>
+          )}
+          {!providersLoading && !providersError && activeProviders.length >= 2 && (
+            <div className="mb-3">
+              <label className="block text-xs text-text-muted mb-1">Способ оплаты</label>
+              <select
+                value={selectedProvider ?? ''}
+                onChange={(e) => setSelectedProvider(e.target.value)}
+                className="w-full rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent"
+              >
+                {activeProviders.map(p => (
+                  <option key={p.name} value={p.name}>{p.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {payMutation.isError && (
             <p className="mb-3 text-xs text-red-400">
               {payMutation.error instanceof ApiError ? payMutation.error.detail : 'Ошибка оплаты'}
@@ -305,14 +348,14 @@ export default function SubscriptionPage() {
           )}
           <button
             onClick={handlePay}
-            disabled={payMutation.isPending || showVerifyBanner}
+            disabled={payMutation.isPending || showVerifyBanner || providersLoading || providersError || activeProviders.length === 0 || !selectedProvider}
             title={showVerifyBanner ? 'Сначала подтвердите email' : undefined}
             className={`w-full rounded-input bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-medium py-2.5 text-sm transition-colors flex items-center justify-center gap-2 ${showVerifyBanner ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {payMutation.isPending ? (
               <><Loader2 size={14} className="animate-spin" /> Подготовка…</>
             ) : (
-              'Оплатить криптовалютой'
+              activeProviders.length === 0 ? 'Оплата недоступна' : `Оплатить через ${activeProviders.find(p => p.name === selectedProvider)?.label ?? 'CryptoBot'}`
             )}
           </button>
         </div>
