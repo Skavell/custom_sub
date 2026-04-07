@@ -586,9 +586,8 @@ function CryptoBotBlock({ settings }: { settings: SettingAdminItem[] }) {
   const [open, setOpen] = useState(false)
 
   const enabledSetting = settings.find(s => s.key === 'cryptobot_enabled')
-  const tokenSetting = settings.find(s => s.key === 'cryptobot_token')
-  const rateSetting = settings.find(s => s.key === 'usdt_exchange_rate')
   const webhookSetting = settings.find(s => s.key === 'cryptobot_webhook_allowed_ips')
+    ?? { key: 'cryptobot_webhook_allowed_ips', value: null, is_sensitive: false, updated_at: '' }
 
   return (
     <div className="rounded-input border border-border-neutral overflow-hidden">
@@ -604,31 +603,25 @@ function CryptoBotBlock({ settings }: { settings: SettingAdminItem[] }) {
       </div>
       {open && (
         <div className="px-4 py-3 border-t border-border-neutral space-y-3">
-          {tokenSetting && (
-            <OAuthField
-              label="API токен CryptoBot"
-              settingKey="cryptobot_token"
-              sensitive
-              settings={settings}
-            />
-          )}
-          {rateSetting && (
-            <OAuthField
-              label="Курс USDT (руб.)"
-              settingKey="usdt_exchange_rate"
-              sensitive={false}
-              placeholder="90.5"
-              hint="Число, например 90.5"
-              settings={settings}
-            />
-          )}
-          {webhookSetting && (
-            <WebhookIPsSettingRow
-              setting={webhookSetting}
-              label="Разрешённые IP вебхуков"
-              hint="Один IP на строку. Если пусто — разрешены все IP."
-            />
-          )}
+          <OAuthField
+            label="API токен CryptoBot"
+            settingKey="cryptobot_token"
+            sensitive
+            settings={settings}
+          />
+          <OAuthField
+            label="Курс USDT (руб.)"
+            settingKey="usdt_exchange_rate"
+            sensitive={false}
+            placeholder="90.5"
+            hint="Число, например 90.5"
+            settings={settings}
+          />
+          <WebhookIPsSettingRow
+            setting={webhookSetting}
+            label="Разрешённые IP вебхуков"
+            hint="Один IP на строку. Если пусто — разрешены все IP."
+          />
         </div>
       )}
     </div>
