@@ -92,6 +92,7 @@ export default function SubscriptionPage() {
   const { data: providers = [], isLoading: providersLoading, isError: providersError } = useQuery<PaymentProviderInfo[]>({
     queryKey: ['payment-providers'],
     queryFn: () => api.get<PaymentProviderInfo[]>('/api/payments/providers'),
+    staleTime: 60_000,
   })
 
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
@@ -102,10 +103,10 @@ export default function SubscriptionPage() {
   // Only resets if no selection yet, or current selection no longer active.
   // Preserves user's manual choice on background refetches.
   useEffect(() => {
-    const stillValid = selectedProvider !== null && activeProviders.some(p => p.name === selectedProvider)
-    if (!stillValid) {
-      setSelectedProvider(activeProviders[0]?.name ?? null)
-    }
+    setSelectedProvider(prev => {
+      const stillValid = prev !== null && activeProviders.some(p => p.name === prev)
+      return stillValid ? prev : (activeProviders[0]?.name ?? null)
+    })
   }, [providers]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const showVerifyBanner =
@@ -355,7 +356,7 @@ export default function SubscriptionPage() {
             {payMutation.isPending ? (
               <><Loader2 size={14} className="animate-spin" /> Подготовка…</>
             ) : (
-              activeProviders.length === 0 ? 'Оплата недоступна' : `Оплатить через ${activeProviders.find(p => p.name === selectedProvider)?.label ?? 'CryptoBot'}`
+              activeProviders.length === 0 ? 'Оплата недоступна' : `Оплатить через ${activeProviders.find(p => p.name === selectedProvider)?.label ?? selectedProvider ?? '...'}`
             )}
           </button>
         </div>
