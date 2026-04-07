@@ -380,12 +380,13 @@ function NumberBytesSettingRow({ setting, label, hint }: { setting: SettingAdmin
 // ─── OAuth provider field (single text input) ─────────────────────────────────
 
 function OAuthField({
-  label, settingKey, sensitive, placeholder, settings,
+  label, settingKey, sensitive, placeholder, hint, settings,
 }: {
   label: string
   settingKey: string
   sensitive?: boolean
   placeholder?: string
+  hint?: string
   settings: SettingAdminItem[]
 }) {
   const queryClient = useQueryClient()
@@ -410,6 +411,7 @@ function OAuthField({
   return (
     <div>
       <label className="block text-xs text-text-muted mb-1">{label}</label>
+      {hint && <p className="text-xs text-text-muted mb-1">{hint}</p>}
       <div className="flex gap-2">
         <div className="relative flex-1">
           <input
@@ -616,6 +618,7 @@ function CryptoBotBlock({ settings }: { settings: SettingAdminItem[] }) {
               settingKey="usdt_exchange_rate"
               sensitive={false}
               placeholder="90.5"
+              hint="Число, например 90.5"
               settings={settings}
             />
           )}
