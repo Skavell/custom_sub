@@ -16,9 +16,7 @@ from app.models.user import User
 from app.redis_client import get_redis
 from app.schemas.payment import CreatePaymentRequest, PaymentResponse, TransactionHistoryItem, PaymentProviderInfo
 from app.services.payment_providers.base import InvoiceResult
-from app.services.payment_providers.factory import (
-    get_active_provider, _KNOWN_PROVIDERS, _PROVIDER_LABELS, _is_provider_active
-)
+from app.services.payment_providers.factory import get_active_provider, list_providers
 from app.schemas.payment import CryptoBotWebhookPayload
 from app.services.payment_service import calculate_final_price, complete_payment, get_pending_transaction
 from app.services.rate_limiter import check_rate_limit
@@ -43,14 +41,7 @@ async def get_payment_providers(
     """Returns all known payment providers with their active status.
     Available to any authenticated user (non-admin). Used by SubscriptionPage.
     """
-    result = []
-    for name in _KNOWN_PROVIDERS:
-        result.append(PaymentProviderInfo(
-            name=name,
-            label=_PROVIDER_LABELS[name],
-            is_active=await _is_provider_active(db, name),
-        ))
-    return result
+    return await list_providers(db)
 
 
 async def _create_transaction(

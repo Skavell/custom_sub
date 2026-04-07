@@ -69,3 +69,17 @@ async def get_active_provider(db: AsyncSession, provider_name: str) -> PaymentPr
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="Платёжная система не настроена. Обратитесь в поддержку.",
     )
+
+
+async def list_providers(db: AsyncSession) -> list["PaymentProviderInfo"]:
+    """Returns all known providers with their active status. Used by the payments router."""
+    from app.schemas.payment import PaymentProviderInfo
+
+    return [
+        PaymentProviderInfo(
+            name=name,
+            label=_PROVIDER_LABELS[name],
+            is_active=await _is_provider_active(db, name),
+        )
+        for name in _KNOWN_PROVIDERS
+    ]
