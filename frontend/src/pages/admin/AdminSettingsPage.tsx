@@ -15,12 +15,12 @@ const OAUTH_KEYS = new Set([
   'support_telegram_link', 'telegram_support_chat_id',
 ])
 
-// Keys that belong to the install apps group
 const INSTALL_KEY_PREFIX = 'install_'
 
 const REMNAWAVE_KEYS = new Set([
   'remnawave_url', 'remnawave_token',
-  'remnawave_trial_squad_uuids', 'remnawave_paid_squad_uuids',
+  'remnawave_trial_internal_squad_uuids', 'remnawave_trial_external_squad_uuids',
+  'remnawave_paid_internal_squad_uuids', 'remnawave_paid_external_squad_uuids',
 ])
 
 const TRIAL_KEYS = new Set([
@@ -35,11 +35,20 @@ const REGISTRATION_KEYS = new Set([
   'registration_enabled', 'email_verification_enabled', 'allowed_email_domains',
 ])
 
+const PAYMENT_KEYS = new Set([
+  'cryptobot_enabled',
+  'cryptobot_token',
+  'usdt_exchange_rate',
+  'cryptobot_webhook_allowed_ips',
+])
+
 const SETTING_LABELS: Record<string, string> = {
   remnawave_url: 'URL сервера Remnawave',
   remnawave_token: 'API токен Remnawave',
-  remnawave_trial_squad_uuids: 'Squad UUID для триала',
-  remnawave_paid_squad_uuids: 'Squad UUID для платной подписки',
+  remnawave_trial_internal_squad_uuids: 'Внутренние сквады (триал)',
+  remnawave_trial_external_squad_uuids: 'Внешние сквады (триал)',
+  remnawave_paid_internal_squad_uuids: 'Внутренние сквады (платная)',
+  remnawave_paid_external_squad_uuids: 'Внешние сквады (платная)',
   remnawave_trial_days: 'Длительность триала (дней)',
   remnawave_trial_traffic_limit_bytes: 'Лимит трафика триала',
   resend_api_key: 'API ключ Resend',
@@ -48,6 +57,13 @@ const SETTING_LABELS: Record<string, string> = {
   registration_enabled: 'Регистрация открыта',
   email_verification_enabled: 'Подтверждение email обязательно',
   allowed_email_domains: 'Разрешённые домены',
+}
+
+const SETTING_HINTS: Record<string, string> = {
+  remnawave_trial_internal_squad_uuids: 'UUID через запятую. Ноды вашей собственной инфраструктуры.',
+  remnawave_trial_external_squad_uuids: 'UUID через запятую. Ноды внешних провайдеров.',
+  remnawave_paid_internal_squad_uuids: 'UUID через запятую. Ноды вашей собственной инфраструктуры. Назначаются при оплате.',
+  remnawave_paid_external_squad_uuids: 'UUID через запятую. Ноды внешних провайдеров. Назначаются при оплате.',
 }
 
 // ─── Generic setting row ─────────────────────────────────────────────────────
@@ -237,6 +253,68 @@ function TextareaSettingRow({ setting, label, hint }: { setting: SettingAdminIte
   )
 }
 
+// ─── Webhook IPs setting row ──────────────────────────────────────────────────
+
+function WebhookIPsSettingRow({ setting, label, hint }: { setting: SettingAdminItem; label: string; hint?: string }) {
+  const queryClient = useQueryClient()
+
+  const loadIPs = (raw: string | null): string => {
+    if (!raw || raw.trim() === '') return ''
+    try { return (JSON.parse(raw) as string[]).join('\n') }
+    catch { return raw }
+  }
+
+  const [value, setValue] = useState(() => loadIPs(setting.value ?? null))
+  const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const mutation = useMutation({
+    mutationFn: (v: string) =>
+      api.put(`/api/admin/settings/${setting.key}`, { value: v, is_sensitive: setting.is_sensitive }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-settings'] })
+      setSaved(true)
+      setSaveError(null)
+      setTimeout(() => setSaved(false), 2000)
+    },
+    onError: (e) => setSaveError(e instanceof ApiError ? e.detail : 'Ошибка'),
+  })
+
+  const handleSave = () => {
+    const ips = JSON.stringify(value.split('\n').map(s => s.trim()).filter(Boolean))
+    mutation.mutate(ips)
+  }
+
+  return (
+    <div className="rounded-input bg-surface border border-border-neutral px-4 py-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-text-primary">{label}</p>
+          {hint && <p className="text-xs text-text-muted mt-0.5">{hint}</p>}
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={mutation.isPending}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-input text-xs font-medium transition-colors ${
+            saved ? 'bg-green-500/20 text-green-400' : 'bg-accent/10 text-accent hover:bg-accent/20'
+          } disabled:opacity-50`}
+        >
+          <Save size={13} />
+          {saved ? 'Сохранено' : 'Сохранить'}
+        </button>
+      </div>
+      <textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        rows={4}
+        placeholder={"1.2.3.4\n5.6.7.8"}
+        className="w-full rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent font-mono resize-none"
+      />
+      {saveError && <p className="text-xs text-red-400">{saveError}</p>}
+    </div>
+  )
+}
+
 // ─── Number (bytes) setting row ───────────────────────────────────────────────
 
 function NumberBytesSettingRow({ setting, label, hint }: { setting: SettingAdminItem; label: string; hint?: string }) {
@@ -394,6 +472,37 @@ function OAuthToggle({ label, settingKey, settings }: { label: string; settingKe
   )
 }
 
+// ─── Collapsible section ──────────────────────────────────────────────────────
+
+function CollapsibleSection({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <div className="rounded-card border border-border-neutral overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-white/3 hover:bg-white/5 transition-colors"
+      >
+        <span className="text-sm font-medium text-text-primary">{title}</span>
+        {open ? <ChevronDown size={14} className="text-text-muted" /> : <ChevronRight size={14} className="text-text-muted" />}
+      </button>
+      {open && (
+        <div className="px-4 py-4 border-t border-border-neutral space-y-2">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── OAuth provider block ─────────────────────────────────────────────────────
 
 function OAuthProviderBlock({
@@ -426,6 +535,97 @@ function OAuthProviderBlock({
               settings={settings}
             />
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── CryptoBot enabled toggle (inline) ───────────────────────────────────────
+
+function CryptoBotEnabledToggle({ setting }: { setting: SettingAdminItem }) {
+  const queryClient = useQueryClient()
+  const [isOn, setIsOn] = useState(setting.value === 'true')
+
+  const mutation = useMutation({
+    mutationFn: (v: string) =>
+      api.put(`/api/admin/settings/${setting.key}`, { value: v, is_sensitive: false }),
+    onSuccess: (_, v) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-settings'] })
+      setIsOn(v === 'true')
+    },
+    onError: () => setIsOn(setting.value === 'true'),
+  })
+
+  const toggle = () => {
+    const newVal = isOn ? 'false' : 'true'
+    setIsOn(!isOn)
+    mutation.mutate(newVal)
+  }
+
+  return (
+    <button
+      onClick={toggle}
+      disabled={mutation.isPending}
+      className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
+    >
+      {isOn
+        ? <ToggleRight size={20} className="text-accent" />
+        : <ToggleLeft size={20} className="text-text-muted" />
+      }
+      CryptoBot
+    </button>
+  )
+}
+
+// ─── CryptoBot block ──────────────────────────────────────────────────────────
+
+function CryptoBotBlock({ settings }: { settings: SettingAdminItem[] }) {
+  const [open, setOpen] = useState(false)
+
+  const enabledSetting = settings.find(s => s.key === 'cryptobot_enabled')
+  const tokenSetting = settings.find(s => s.key === 'cryptobot_token')
+  const rateSetting = settings.find(s => s.key === 'usdt_exchange_rate')
+  const webhookSetting = settings.find(s => s.key === 'cryptobot_webhook_allowed_ips')
+
+  return (
+    <div className="rounded-input border border-border-neutral overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 bg-white/3">
+        {enabledSetting ? (
+          <CryptoBotEnabledToggle setting={enabledSetting} />
+        ) : (
+          <span className="text-sm text-text-secondary">CryptoBot</span>
+        )}
+        <button onClick={() => setOpen((v) => !v)} className="text-text-muted hover:text-text-primary transition-colors">
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </button>
+      </div>
+      {open && (
+        <div className="px-4 py-3 border-t border-border-neutral space-y-3">
+          {tokenSetting && (
+            <OAuthField
+              label="API токен CryptoBot"
+              settingKey="cryptobot_token"
+              sensitive
+              settings={settings}
+            />
+          )}
+          {rateSetting && (
+            <OAuthField
+              label="Курс USDT (руб.)"
+              settingKey="usdt_exchange_rate"
+              sensitive={false}
+              placeholder="90.5"
+              settings={settings}
+            />
+          )}
+          {webhookSetting && (
+            <WebhookIPsSettingRow
+              setting={webhookSetting}
+              label="Разрешённые IP вебхуков"
+              hint="Один IP на строку. Если пусто — разрешены все IP."
+            />
+          )}
         </div>
       )}
     </div>
@@ -470,99 +670,126 @@ export default function AdminSettingsPage() {
             !TRIAL_KEYS.has(s.key) &&
             !EMAIL_SERVICE_KEYS.has(s.key) &&
             !REGISTRATION_KEYS.has(s.key) &&
+            !PAYMENT_KEYS.has(s.key) &&
             !OAUTH_KEYS.has(s.key) &&
             !s.key.startsWith(INSTALL_KEY_PREFIX),
         )
 
+        // Split remnawave keys into API config vs squad assignments
+        const rw_api = remnawave.filter(s => s.key === 'remnawave_url' || s.key === 'remnawave_token')
+        const rw_trial_squads = remnawave.filter(s => s.key.startsWith('remnawave_trial_') && s.key.endsWith('_squad_uuids'))
+        const rw_paid_squads = remnawave.filter(s => s.key.startsWith('remnawave_paid_') && s.key.endsWith('_squad_uuids'))
+
         return (
-          <div className="space-y-8">
+          <div className="space-y-3">
             {/* Remnawave */}
             {remnawave.length > 0 && (
-              <section>
-                <h2 className="text-sm font-medium text-text-secondary mb-3">Remnawave</h2>
-                <div className="space-y-2">
-                  {remnawave.map(s => (
-                    <SettingRow
-                      key={s.key}
-                      setting={s}
-                      labelOverride={SETTING_LABELS[s.key]}
-                      hint={
-                        s.key === 'remnawave_trial_squad_uuids'
-                          ? 'UUID через запятую. Если пусто — используется устаревший ключ remnawave_squad_uuids'
-                          : undefined
-                      }
-                    />
-                  ))}
-                </div>
-              </section>
+              <CollapsibleSection title="Remnawave" defaultOpen>
+                {/* API connection */}
+                {rw_api.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide px-1">Подключение к API</p>
+                    {rw_api.map(s => (
+                      <SettingRow
+                        key={s.key}
+                        setting={s}
+                        labelOverride={SETTING_LABELS[s.key]}
+                      />
+                    ))}
+                  </div>
+                )}
+                {/* Trial squads */}
+                {rw_trial_squads.length > 0 && (
+                  <div className="space-y-2 pt-2">
+                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide px-1">Сквады — Пробный период</p>
+                    {rw_trial_squads.map(s => (
+                      <SettingRow
+                        key={s.key}
+                        setting={s}
+                        labelOverride={SETTING_LABELS[s.key]}
+                        hint={SETTING_HINTS[s.key]}
+                      />
+                    ))}
+                  </div>
+                )}
+                {/* Paid squads */}
+                {rw_paid_squads.length > 0 && (
+                  <div className="space-y-2 pt-2">
+                    <p className="text-xs font-medium text-text-muted uppercase tracking-wide px-1">Сквады — Платная подписка</p>
+                    {rw_paid_squads.map(s => (
+                      <SettingRow
+                        key={s.key}
+                        setting={s}
+                        labelOverride={SETTING_LABELS[s.key]}
+                        hint={SETTING_HINTS[s.key]}
+                      />
+                    ))}
+                  </div>
+                )}
+              </CollapsibleSection>
             )}
 
             {/* Пробный период */}
             {trial.length > 0 && (
-              <section>
-                <h2 className="text-sm font-medium text-text-secondary mb-3">Пробный период</h2>
-                <div className="space-y-2">
-                  {trial.map(s =>
-                    s.key === 'remnawave_trial_traffic_limit_bytes' ? (
-                      <NumberBytesSettingRow
-                        key={s.key}
-                        setting={s}
-                        label={SETTING_LABELS[s.key] ?? s.key}
-                      />
-                    ) : (
-                      <SettingRow key={s.key} setting={s} labelOverride={SETTING_LABELS[s.key]} />
-                    ),
-                  )}
-                </div>
-              </section>
+              <CollapsibleSection title="Пробный период">
+                {trial.map(s =>
+                  s.key === 'remnawave_trial_traffic_limit_bytes' ? (
+                    <NumberBytesSettingRow
+                      key={s.key}
+                      setting={s}
+                      label={SETTING_LABELS[s.key] ?? s.key}
+                    />
+                  ) : (
+                    <SettingRow key={s.key} setting={s} labelOverride={SETTING_LABELS[s.key]} />
+                  ),
+                )}
+              </CollapsibleSection>
             )}
 
             {/* Email-сервис */}
             {emailService.length > 0 && (
-              <section>
-                <h2 className="text-sm font-medium text-text-secondary mb-3">Email-сервис (Resend)</h2>
-                <div className="space-y-2">
-                  {emailService.map(s => (
-                    <SettingRow key={s.key} setting={s} labelOverride={SETTING_LABELS[s.key]} />
-                  ))}
-                </div>
-              </section>
+              <CollapsibleSection title="Email-сервис (Resend)">
+                {emailService.map(s => (
+                  <SettingRow key={s.key} setting={s} labelOverride={SETTING_LABELS[s.key]} />
+                ))}
+              </CollapsibleSection>
             )}
 
             {/* Регистрация */}
             {registration.length > 0 && (
-              <section>
-                <h2 className="text-sm font-medium text-text-secondary mb-3">Регистрация</h2>
-                <div className="space-y-2">
-                  {registration.map(s => {
-                    if (s.key === 'allowed_email_domains') {
-                      return (
-                        <TextareaSettingRow
-                          key={s.key}
-                          setting={s}
-                          label={SETTING_LABELS[s.key] ?? s.key}
-                          hint="Один домен на строку. Если пусто — разрешены все домены."
-                        />
-                      )
-                    }
-                    if (s.key === 'registration_enabled' || s.key === 'email_verification_enabled') {
-                      return (
-                        <ToggleSettingRow
-                          key={s.key}
-                          setting={s}
-                          label={SETTING_LABELS[s.key] ?? s.key}
-                        />
-                      )
-                    }
-                    return <SettingRow key={s.key} setting={s} labelOverride={SETTING_LABELS[s.key]} />
-                  })}
-                </div>
-              </section>
+              <CollapsibleSection title="Регистрация">
+                {registration.map(s => {
+                  if (s.key === 'allowed_email_domains') {
+                    return (
+                      <TextareaSettingRow
+                        key={s.key}
+                        setting={s}
+                        label={SETTING_LABELS[s.key] ?? s.key}
+                        hint="Один домен на строку. Если пусто — разрешены все домены."
+                      />
+                    )
+                  }
+                  if (s.key === 'registration_enabled' || s.key === 'email_verification_enabled') {
+                    return (
+                      <ToggleSettingRow
+                        key={s.key}
+                        setting={s}
+                        label={SETTING_LABELS[s.key] ?? s.key}
+                      />
+                    )
+                  }
+                  return <SettingRow key={s.key} setting={s} labelOverride={SETTING_LABELS[s.key]} />
+                })}
+              </CollapsibleSection>
             )}
 
+            {/* Платёжные системы */}
+            <CollapsibleSection title="Платёжные системы">
+              <CryptoBotBlock settings={allSettings} />
+            </CollapsibleSection>
+
             {/* OAuth провайдеры */}
-            <section>
-              <h2 className="text-sm font-medium text-text-secondary mb-3">OAuth провайдеры</h2>
+            <CollapsibleSection title="OAuth провайдеры">
               <div className="flex flex-col gap-2">
                 <OAuthProviderBlock
                   title="Google"
@@ -599,30 +826,24 @@ export default function AdminSettingsPage() {
                   <OAuthToggle label="Email / Пароль" settingKey="email_enabled" settings={allSettings} />
                 </div>
               </div>
-            </section>
+            </CollapsibleSection>
 
             {/* Приложения */}
             {installSettings.length > 0 && (
-              <section>
-                <h2 className="text-sm font-medium text-text-secondary mb-3">Приложения</h2>
-                <div className="space-y-2">
-                  {installSettings.map(s => (
-                    <SettingRow key={s.key} setting={s} />
-                  ))}
-                </div>
-              </section>
+              <CollapsibleSection title="Приложения и ссылки">
+                {installSettings.map(s => (
+                  <SettingRow key={s.key} setting={s} />
+                ))}
+              </CollapsibleSection>
             )}
 
             {/* Прочее */}
             {otherSettings.length > 0 && (
-              <section>
-                <h2 className="text-sm font-medium text-text-secondary mb-3">Прочее</h2>
-                <div className="space-y-2">
-                  {otherSettings.map(s => (
-                    <SettingRow key={s.key} setting={s} />
-                  ))}
-                </div>
-              </section>
+              <CollapsibleSection title="Прочее">
+                {otherSettings.map(s => (
+                  <SettingRow key={s.key} setting={s} />
+                ))}
+              </CollapsibleSection>
             )}
           </div>
         )
