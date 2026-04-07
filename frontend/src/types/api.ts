@@ -10,6 +10,7 @@ export interface UserProfile {
   id: string
   display_name: string
   is_admin: boolean
+  has_made_payment: boolean
   created_at: string
   providers: ProviderInfo[]
   email_verified: boolean | null   // null = no email provider
@@ -117,6 +118,7 @@ export interface ApplyPromoRequest {
 export interface CreatePaymentRequest {
   plan_id: string
   promo_code?: string | null
+  provider: string
 }
 
 // ─── Admin types (Plan 10) ───────────────────────────────────────────────────
@@ -333,4 +335,10 @@ export interface PlanAdminCreateRequest {
   new_user_price_rub?: number | null
   is_active?: boolean
   sort_order?: number
+}
+
+export interface PaymentProviderInfo {
+  name: string
+  label: string
+  is_active: boolean
 }
