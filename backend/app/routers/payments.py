@@ -14,9 +14,11 @@ from app.models.plan import Plan
 from app.models.transaction import Transaction, TransactionStatus, TransactionType
 from app.models.user import User
 from app.redis_client import get_redis
-from app.schemas.payment import CreatePaymentRequest, PaymentResponse, TransactionHistoryItem
+from app.schemas.payment import CreatePaymentRequest, PaymentResponse, TransactionHistoryItem, PaymentProviderInfo
 from app.services.payment_providers.base import InvoiceResult
-from app.services.payment_providers.factory import get_active_provider
+from app.services.payment_providers.factory import (
+    get_active_provider, _KNOWN_PROVIDERS, _PROVIDER_LABELS, _is_provider_active
+)
 from app.schemas.payment import CryptoBotWebhookPayload
 from app.services.payment_service import calculate_final_price, complete_payment, get_pending_transaction
 from app.services.rate_limiter import check_rate_limit
@@ -31,6 +33,24 @@ router = APIRouter(prefix="/api/payments", tags=["payments"])
 _PAYMENT_RATE_LIMIT = 5
 _PAYMENT_RATE_WINDOW = 60  # seconds
 _PENDING_EXPIRY_MINUTES = 30
+
+
+@router.get("/providers", response_model=list[PaymentProviderInfo])
+async def get_payment_providers(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PaymentProviderInfo]:
+    """Returns all known payment providers with their active status.
+    Available to any authenticated user (non-admin). Used by SubscriptionPage.
+    """
+    result = []
+    for name in _KNOWN_PROVIDERS:
+        result.append(PaymentProviderInfo(
+            name=name,
+            label=_PROVIDER_LABELS[name],
+            is_active=await _is_provider_active(db, name),
+        ))
+    return result
 
 
 async def _create_transaction(
@@ -94,7 +114,7 @@ async def create_payment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Тариф не найден")
 
     # Guard 4: provider configured (raises 503 if not)
-    provider = await get_active_provider(db)
+    provider = await get_active_provider(db, data.provider)
 
     # Guard 5/6: deduplication (FOR UPDATE lock serialises concurrent requests)
     now = datetime.now(tz=timezone.utc)
@@ -272,8 +292,17 @@ async def payment_webhook(
             )
             return Response(status_code=500)
 
+        paid_internal = await get_setting(db, "remnawave_paid_internal_squad_uuids") or ""
+        paid_external = await get_setting(db, "remnawave_paid_external_squad_uuids") or ""
+        paid_internal_uuids = [s.strip() for s in paid_internal.split(",") if s.strip()] or None
+        paid_external_uuid = paid_external.strip() or None
+
         try:
-            await complete_payment(db, tx, user, plan, rw_client)
+            await complete_payment(
+                db, tx, user, plan, rw_client,
+                paid_internal_squad_uuids=paid_internal_uuids,
+                paid_external_squad_uuid=paid_external_uuid,
+            )
         except Exception as exc:
             logger.exception("complete_payment failed for tx %s: %s", tx.id, exc)
             try:

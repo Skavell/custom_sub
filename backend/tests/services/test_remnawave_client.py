@@ -72,7 +72,7 @@ async def test_create_user_returns_user(httpx_mock: HTTPXMock):
         username="ws_4a1b2c3d",
         traffic_limit_bytes=32212254720,
         expire_at="2026-04-10T00:00:00Z",
-        squad_ids=["squad-uuid-1"],
+        internal_squad_uuids=["squad-uuid-1"],
         telegram_id=515172616,
         description="@skavellion_user",
     )
@@ -84,7 +84,7 @@ async def test_update_user(httpx_mock: HTTPXMock):
     updated = {**SAMPLE_USER_RESPONSE, "trafficLimitBytes": 0}
     httpx_mock.add_response(
         method="PATCH",
-        url=f"{BASE_URL}/users/aaaaaaaa-0000-0000-0000-000000000001",
+        url=f"{BASE_URL}/users",
         json=updated,
     )
     client = RemnawaveClient(BASE_URL, TOKEN)

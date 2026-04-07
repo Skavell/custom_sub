@@ -106,31 +106,25 @@ async def test_create_payment_plan_not_found_returns_404():
 
 @pytest.mark.asyncio
 async def test_create_payment_not_configured_returns_503():
+    """Provider enabled but token missing → HTTP 503."""
     user = _make_user(remnawave_uuid=uuid.uuid4())
     redis = AsyncMock()
     redis.incr.return_value = 1
     db = AsyncMock(spec=AsyncSession)
-
-    call_count = [0]
-    def _side_effect(stmt, *a, **kw):
-        call_count[0] += 1
-        result = MagicMock()
-        if call_count[0] == 1:
-            # Plan query
-            result.scalar_one_or_none = MagicMock(return_value=_make_plan())
-        else:
-            result.scalar_one_or_none = MagicMock(return_value=None)
-        return result
-    db.execute = AsyncMock(side_effect=_side_effect)
+    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=_make_plan())))
 
     app.dependency_overrides[get_current_user] = _override_user(user)
     app.dependency_overrides[get_db] = _override_db(db)
     app.dependency_overrides[get_redis] = _override_redis(redis)
-    try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.post("/api/payments", json={"plan_id": str(PLAN_ID)})
-    finally:
-        app.dependency_overrides.clear()
+
+    import fastapi as _fastapi
+    with patch("app.routers.payments.get_active_provider", side_effect=_fastapi.HTTPException(status_code=503, detail="not configured")), \
+         patch("app.routers.payments.get_pending_transaction", return_value=None):
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.post("/api/payments", json={"plan_id": str(PLAN_ID)})
+        finally:
+            app.dependency_overrides.clear()
     assert resp.status_code == 503
 
 
@@ -220,3 +214,34 @@ async def test_create_payment_success_returns_201():
     data = resp.json()
     assert data["payment_url"] == "https://t.me/CryptoBot?start=IVnew"
     assert data["is_existing"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_payment_unknown_provider_returns_400():
+    """provider field is validated — unknown names get HTTP 400."""
+    user = _make_user(remnawave_uuid=str(uuid.uuid4()))
+    mock_db = AsyncMock()
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(return_value=None)
+    mock_redis.set = AsyncMock(return_value=True)
+
+    app.dependency_overrides[get_db] = _override_db(mock_db)
+    app.dependency_overrides[get_current_user] = _override_user(user)
+    app.dependency_overrides[get_redis] = _override_redis(mock_redis)
+
+    # Mock DB to return a valid plan
+    mock_plan = _make_plan()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none = MagicMock(return_value=mock_plan)
+    mock_db.execute = AsyncMock(return_value=mock_result)
+
+    with patch("app.routers.payments.check_rate_limit", return_value=True), \
+         patch("app.routers.payments.get_pending_transaction", return_value=None):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/api/payments", json={
+                "plan_id": str(PLAN_ID),
+                "provider": "nonexistent_provider",
+            })
+
+    app.dependency_overrides.clear()
+    assert resp.status_code == 400

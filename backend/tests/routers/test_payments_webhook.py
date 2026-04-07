@@ -161,6 +161,7 @@ async def test_webhook_paid_success_returns_200():
          patch("app.routers.payments._load_transaction", return_value=tx), \
          patch("app.routers.payments._load_plan_and_user", return_value=(plan, MagicMock())), \
          patch("app.routers.payments._get_remnawave_client", return_value=MagicMock()), \
+         patch("app.routers.payments.get_setting", return_value=None), \
          patch("app.routers.payments.complete_payment", mock_complete):
         app.dependency_overrides[get_db] = _override_db(db)
         try:
@@ -190,6 +191,7 @@ async def test_webhook_paid_remnawave_failure_returns_500():
          patch("app.routers.payments._load_transaction", return_value=tx), \
          patch("app.routers.payments._load_plan_and_user", return_value=(plan, MagicMock())), \
          patch("app.routers.payments._get_remnawave_client", return_value=MagicMock()), \
+         patch("app.routers.payments.get_setting", new=AsyncMock(return_value=None)), \
          patch("app.routers.payments.complete_payment",
                side_effect=_httpx.RequestError("timeout")), \
          patch("app.routers.payments.send_admin_alert", new=AsyncMock()):
