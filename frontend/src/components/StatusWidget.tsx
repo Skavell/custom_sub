@@ -88,5 +88,109 @@ function StatusRow({ name, status, ping, uptime, showPing }: StatusRowProps) {
   )
 }
 
-export { StatusRow }
-export type { Monitor, MonitorGroup, StatusRowProps }
+// ── StatusGroup ───────────────────────────────────────────────────────────────
+
+interface StatusGroupProps {
+  name: string
+  monitors: Monitor[]
+  showPing: boolean
+}
+
+function StatusGroup({ name, monitors, showPing }: StatusGroupProps) {
+  return (
+    <div className="mb-3 last:mb-0">
+      <p className="text-xs uppercase tracking-wide text-text-muted mb-1.5 px-0.5">
+        {name}
+      </p>
+      <div className="flex flex-col gap-1">
+        {monitors.map((m) => (
+          <StatusRow
+            key={m.id}
+            name={m.name}
+            status={m.status}
+            ping={m.ping}
+            uptime={m.uptime}
+            showPing={showPing}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── StatusBanner ──────────────────────────────────────────────────────────────
+
+interface StatusBannerProps {
+  isOpen: boolean
+  onToggle: () => void
+  upCount: number
+  totalCount: number
+  isLoading: boolean
+  isError: boolean
+}
+
+function StatusBanner({
+  isOpen,
+  onToggle,
+  upCount,
+  totalCount,
+  isLoading,
+  isError,
+}: StatusBannerProps) {
+  const canExpand = !isLoading && !isError
+
+  let dotColor: string
+  let label: string
+
+  if (isLoading) {
+    dotColor = 'bg-slate-500'
+    label = 'Загрузка...'
+  } else if (isError) {
+    dotColor = 'bg-slate-500'
+    label = 'Статус недоступен'
+  } else if (upCount === 0 && totalCount > 0) {
+    dotColor = 'bg-red-500'
+    label = 'Есть проблемы'
+  } else if (upCount < totalCount) {
+    dotColor = 'bg-emerald-500'
+    label = 'Есть проблемы'
+  } else {
+    dotColor = 'bg-emerald-500'
+    label = 'Все системы работают'
+  }
+
+  return (
+    <button
+      onClick={canExpand ? onToggle : undefined}
+      disabled={!canExpand}
+      className={cn(
+        'w-full flex items-center justify-between rounded-input px-3 py-2.5 bg-white/5 border border-border-neutral transition-colors',
+        canExpand && 'hover:border-accent/30 cursor-pointer'
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            'w-2 h-2 rounded-full shrink-0',
+            dotColor,
+            !isLoading && !isError && 'animate-pulse'
+          )}
+        />
+        <span className="text-sm text-text-primary font-medium">{label}</span>
+      </div>
+      {canExpand && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-text-muted">
+            {upCount}/{totalCount}
+          </span>
+          <span className="text-xs text-text-muted">
+            {isOpen ? '▲' : '▼'}
+          </span>
+        </div>
+      )}
+    </button>
+  )
+}
+
+export { StatusRow, StatusGroup, StatusBanner }
+export type { Monitor, MonitorGroup, StatusRowProps, StatusGroupProps, StatusBannerProps }
