@@ -8,6 +8,7 @@ import { api, ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import type { TrialActivateResponse, SubscriptionResponse, OAuthConfigResponse } from '@/types/api'
 import EmailVerificationBanner from '@/components/EmailVerificationBanner'
+import StatusWidget from '@/components/StatusWidget'
 
 function StatusBadge({ status }: { status: string }) {
   const colors = {
@@ -235,6 +236,11 @@ export default function HomePage() {
             <span className="text-xs">{label}</span>
           </Link>
         ))}
+      </div>
+
+      {/* Status widget */}
+      <div className="mt-6">
+        <StatusWidget />
       </div>
     </div>
   )
