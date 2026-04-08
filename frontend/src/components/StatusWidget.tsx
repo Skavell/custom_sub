@@ -192,5 +192,98 @@ function StatusBanner({
   )
 }
 
+// ── Data merge ────────────────────────────────────────────────────────────────
+
+function mergeData(
+  nodes: UptimeKumaNodes,
+  heartbeat: UptimeKumaHeartbeat
+): MonitorGroup[] {
+  return nodes.publicGroupList
+    .map((group) => {
+      const monitors: Monitor[] = group.monitorList.map((m) => {
+        const beats = heartbeat.heartbeatList[String(m.id)]
+        const lastBeat = beats && beats.length > 0 ? beats[beats.length - 1] : null
+        const uptimeRaw = heartbeat.uptimeList[`${m.id}_24`]
+        return {
+          id: m.id,
+          name: m.name,
+          status: lastBeat ? lastBeat.status : 0,
+          ping: lastBeat ? lastBeat.ping : null,
+          uptime: uptimeRaw !== undefined ? uptimeRaw * 100 : null,
+        }
+      })
+      return { name: group.name, monitors }
+    })
+    .filter((g) => g.monitors.length > 0)
+}
+
+// ── StatusWidget (default export) ─────────────────────────────────────────────
+
+export default function StatusWidget() {
+  const [isOpen, setIsOpen] = useState(false)
+
+  const { data: nodes } = useQuery<UptimeKumaNodes>({
+    queryKey: ['statusNodes'],
+    queryFn: () =>
+      fetch(`${UPTIME_KUMA_BASE}/api/status-page/${STATUS_PAGE_SLUG}`).then(
+        (r) => r.json()
+      ),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const {
+    data: heartbeat,
+    isLoading,
+    isError,
+  } = useQuery<UptimeKumaHeartbeat>({
+    queryKey: ['statusHeartbeat'],
+    queryFn: () =>
+      fetch(
+        `${UPTIME_KUMA_BASE}/api/status-page/heartbeat/${STATUS_PAGE_SLUG}`
+      ).then((r) => r.json()),
+    refetchInterval: 3 * 60 * 1000,
+    staleTime: 3 * 60 * 1000,
+  })
+
+  const groups: MonitorGroup[] =
+    nodes && heartbeat ? mergeData(nodes, heartbeat) : []
+
+  const totalCount = groups.reduce((s, g) => s + g.monitors.length, 0)
+  const upCount = groups.reduce(
+    (s, g) => s + g.monitors.filter((m) => m.status === 1).length,
+    0
+  )
+
+  return (
+    <div className="rounded-card bg-surface border border-border-neutral p-4">
+      <p className="text-xs text-text-muted uppercase tracking-wide mb-3">
+        Статус серверов
+      </p>
+
+      <StatusBanner
+        isOpen={isOpen}
+        onToggle={() => setIsOpen((v) => !v)}
+        upCount={upCount}
+        totalCount={totalCount}
+        isLoading={isLoading}
+        isError={isError}
+      />
+
+      {isOpen && groups.length > 0 && (
+        <div className="mt-3">
+          {groups.map((g) => (
+            <StatusGroup
+              key={g.name}
+              name={g.name}
+              monitors={g.monitors}
+              showPing={g.name === PING_GROUP_NAME}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export { StatusRow, StatusGroup, StatusBanner }
 export type { Monitor, MonitorGroup, StatusRowProps, StatusGroupProps, StatusBannerProps }
