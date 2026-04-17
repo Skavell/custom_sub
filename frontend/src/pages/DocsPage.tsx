@@ -17,7 +17,7 @@ export default function DocsPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-2xl mx-auto">
-      <h1 className="text-xl font-bold text-text-primary mb-1">Документация</h1>
+      <h1 className="text-xl font-bold text-text-primary mb-1">Инструкции</h1>
       <p className="text-sm text-text-muted mb-5">Руководства и инструкции</p>
 
       {isLoading ? (

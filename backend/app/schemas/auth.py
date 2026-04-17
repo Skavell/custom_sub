@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator, Field
 
 
 def validate_password_strength(v: str) -> str:
@@ -44,6 +44,8 @@ class TokenResponse(BaseModel):
 
 
 class TelegramOAuthRequest(BaseModel):
+    model_config = ConfigDict(extra='allow')
+
     id: int
     first_name: str
     last_name: str | None = None

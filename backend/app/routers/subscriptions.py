@@ -108,12 +108,10 @@ async def activate_trial(
     trial_days = int(trial_days_str)
     trial_traffic_str = await get_setting(db, "remnawave_trial_traffic_limit_bytes") or str(30 * 1024 ** 3)
     trial_traffic_bytes = int(trial_traffic_str)
-    squad_uuids_str = (
-        await get_setting(db, "remnawave_trial_squad_uuids")
-        or await get_setting(db, "remnawave_squad_uuids")
-        or ""
-    )
-    squad_ids = [s.strip() for s in squad_uuids_str.split(",") if s.strip()]
+    trial_internal = await get_setting(db, "remnawave_trial_internal_squad_uuids") or ""
+    trial_external = await get_setting(db, "remnawave_trial_external_squad_uuids") or ""
+    internal_squad_uuids = [s.strip() for s in trial_internal.split(",") if s.strip()]
+    external_squad_uuid = trial_external.strip() or None
 
     # Build Remnawave username
     user_id_hex = str(current_user.id).replace("-", "")
@@ -147,7 +145,8 @@ async def activate_trial(
             username=username,
             traffic_limit_bytes=trial_traffic_bytes,
             expire_at=expire_at,
-            squad_ids=squad_ids,
+            internal_squad_uuids=internal_squad_uuids or None,
+            external_squad_uuid=external_squad_uuid,
             telegram_id=telegram_id,
             description=description,
         )
@@ -159,7 +158,8 @@ async def activate_trial(
                 username=username_long,
                 traffic_limit_bytes=trial_traffic_bytes,
                 expire_at=expire_at,
-                squad_ids=squad_ids,
+                internal_squad_uuids=internal_squad_uuids or None,
+                external_squad_uuid=external_squad_uuid,
                 telegram_id=telegram_id,
                 description=description,
             )

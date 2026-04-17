@@ -7,7 +7,7 @@ const NAV_ITEMS = [
   { to: '/', label: 'Главная', icon: Home, exact: true },
   { to: '/subscription', label: 'Подписка', icon: CreditCard, exact: false },
   { to: '/install', label: 'Установка', icon: Download, exact: false },
-  { to: '/docs', label: 'Документация', icon: BookOpen, exact: false },
+  { to: '/docs', label: 'Инструкции', icon: BookOpen, exact: false },
   { to: '/support', label: 'Поддержка', icon: MessageCircle, exact: false },
   { to: '/profile', label: 'Профиль', icon: User, exact: false },
 ] as const

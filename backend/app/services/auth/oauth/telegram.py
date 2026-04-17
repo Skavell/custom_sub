@@ -22,7 +22,7 @@ def verify_telegram_data(data: dict, bot_token: str, max_age_seconds: int = 8640
 
     check_data = {k: v for k, v in data.items() if k != "hash"}
     check_string = "\n".join(f"{k}={v}" for k, v in sorted(check_data.items()))
-    secret = hashlib.sha256(bot_token.encode()).digest()
+    secret = hashlib.sha256(bot_token.strip().encode()).digest()
     expected_hash = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(expected_hash, received_hash):

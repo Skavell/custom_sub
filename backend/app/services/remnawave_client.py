@@ -23,6 +23,8 @@ class RemnawaveUser:
 
 
 def _parse_user(data: dict[str, Any]) -> RemnawaveUser:
+    if "response" in data:
+        data = data["response"]
     return RemnawaveUser(
         id=data["uuid"],
         username=data["username"],
@@ -56,14 +58,22 @@ class RemnawaveClient:
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
-            return _parse_user(resp.json())
+            data = resp.json()
+            # API returns {"response": [...]} — array, not single object
+            if "response" in data:
+                items = data["response"]
+                if not items:
+                    return None
+                return _parse_user(items[0])
+            return _parse_user(data)
 
     async def create_user(
         self,
         username: str,
         traffic_limit_bytes: int,
         expire_at: str,
-        squad_ids: list[str],
+        internal_squad_uuids: list[str] | None = None,
+        external_squad_uuid: str | None = None,
         telegram_id: int | None = None,
         description: str | None = None,
     ) -> RemnawaveUser:
@@ -71,14 +81,18 @@ class RemnawaveClient:
             "username": username,
             "trafficLimitBytes": traffic_limit_bytes,
             "expireAt": expire_at,
-            "squadIds": squad_ids,
         }
+        if internal_squad_uuids:
+            payload["activeInternalSquads"] = internal_squad_uuids
+        if external_squad_uuid:
+            payload["externalSquadUuid"] = external_squad_uuid
         if telegram_id is not None:
             payload["telegramId"] = telegram_id
         if description:
             payload["description"] = description
         async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
             resp = await http.post(f"{self._base}/users", headers=self._headers, json=payload)
+            logger.error("Remnawave create_user status=%s body=%s", resp.status_code, resp.text)
             resp.raise_for_status()
             return _parse_user(resp.json())
 
@@ -87,17 +101,38 @@ class RemnawaveClient:
         remnawave_uuid: str,
         traffic_limit_bytes: int | None = None,
         expire_at: str | None = None,
+        internal_squad_uuids: list[str] | None = None,
+        external_squad_uuid: str | None = None,
+        telegram_id: int | None = None,
+        description: str | None = None,
     ) -> RemnawaveUser:
-        payload: dict[str, Any] = {}
+        payload: dict[str, Any] = {"uuid": remnawave_uuid}
         if traffic_limit_bytes is not None:
             payload["trafficLimitBytes"] = traffic_limit_bytes
         if expire_at is not None:
             payload["expireAt"] = expire_at
+        if internal_squad_uuids is not None:
+            payload["activeInternalSquads"] = internal_squad_uuids
+        if external_squad_uuid is not None:
+            payload["externalSquadUuid"] = external_squad_uuid
+        if telegram_id is not None:
+            payload["telegramId"] = telegram_id
+        if description is not None:
+            payload["description"] = description
         async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
             resp = await http.patch(
-                f"{self._base}/users/{remnawave_uuid}",
+                f"{self._base}/users",
                 headers=self._headers,
                 json=payload,
             )
+            logger.error("Remnawave update_user status=%s body=%s", resp.status_code, resp.text)
             resp.raise_for_status()
             return _parse_user(resp.json())
+
+    async def delete_user(self, remnawave_uuid: str) -> None:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
+            resp = await http.delete(
+                f"{self._base}/users/{remnawave_uuid}",
+                headers=self._headers,
+            )
+            resp.raise_for_status()

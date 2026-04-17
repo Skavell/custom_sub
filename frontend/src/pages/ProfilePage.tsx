@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query'
-import { User, Trash2, Clock, Loader2, CheckCircle, XCircle, AlertCircle, Plus, Pencil, Check, X, KeyRound } from 'lucide-react'
+import { User, Trash2, Clock, Loader2, CheckCircle, XCircle, AlertCircle, Plus, Pencil, Check, X, KeyRound, LogOut } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useTransactions } from '@/hooks/useTransactions'
 import { api, ApiError } from '@/lib/api'
@@ -16,7 +17,8 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 const PROVIDER_COLORS: Record<string, string> = {
   telegram: 'text-[#229ED9]',
-  google: 'text-[#EA4335]',
+  // google: 'text-[#EA4335]',
+  google: 'text-[#D3DADB]',
   vk: 'text-[#0077FF]',
   email: 'text-text-muted',
 }
@@ -137,8 +139,17 @@ function TelegramLinkButton({
 
 export default function ProfilePage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { user, isLoading: authLoading } = useAuth()
   const { data: transactions = [], isLoading: txLoading } = useTransactions()
+
+  const logoutMutation = useMutation({
+    mutationFn: () => api.post('/api/auth/logout', {}),
+    onSettled: () => {
+      queryClient.clear()
+      navigate('/login')
+    },
+  })
 
   const unlinkMutation = useMutation({
     mutationFn: (provider: string) =>
@@ -293,7 +304,7 @@ export default function ProfilePage() {
             <p className="text-xs text-text-muted">#{shortId}</p>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="grid grid-cols-2 gap-3 text-sm mb-4">
           <div>
             <p className="text-text-muted text-xs mb-0.5">Аккаунт создан</p>
             <p className="text-text-secondary">{formatDate(user.created_at)}</p>
@@ -303,6 +314,18 @@ export default function ProfilePage() {
             <p className="text-text-secondary">{user.is_admin ? 'Администратор' : 'Пользователь'}</p>
           </div>
         </div>
+        <button
+          onClick={() => logoutMutation.mutate()}
+          disabled={logoutMutation.isPending}
+          className="flex items-center gap-2 text-sm text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+        >
+          {logoutMutation.isPending ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <LogOut size={14} />
+          )}
+          Выйти из аккаунта
+        </button>
       </div>
 
       {/* Linked providers */}

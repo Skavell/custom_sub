@@ -11,7 +11,7 @@ const OAUTH_KEYS = new Set([
   'google_enabled', 'google_client_id', 'google_client_secret',
   'vk_enabled', 'vk_client_id', 'vk_client_secret',
   'email_enabled',
-  'telegram_bot_token', 'telegram_bot_username',
+  'telegram_enabled', 'telegram_bot_token', 'telegram_bot_username',
   'support_telegram_link', 'telegram_support_chat_id',
 ])
 
@@ -807,7 +807,7 @@ export default function AdminSettingsPage() {
                 />
                 <OAuthProviderBlock
                   title="Telegram"
-                  enableKey="telegram_bot_token"
+                  enableKey="telegram_enabled"
                   settings={allSettings}
                   fields={[
                     { label: 'Bot Token', key: 'telegram_bot_token', sensitive: true, placeholder: '123456:ABC…' },

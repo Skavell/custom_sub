@@ -16,10 +16,10 @@ export default function VerifyEmailPage() {
             Ваш адрес электронной почты успешно подтверждён. Теперь вы можете активировать пробный период.
           </p>
           <Link
-            to="/subscription"
+            to="/"
             className="inline-block w-full py-2.5 px-4 rounded-input bg-accent text-background text-sm font-semibold text-center hover:bg-accent/90 transition-colors"
           >
-            Перейти к подписке
+            На главную
           </Link>
         </div>
       </div>

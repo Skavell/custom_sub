@@ -89,6 +89,8 @@ async def complete_payment(
     user: User,
     plan: Plan,
     rw_client: RemnawaveClient,
+    paid_internal_squad_uuids: list[str] | None = None,
+    paid_external_squad_uuid: str | None = None,
 ) -> None:
     """Atomically completes payment: extends Remnawave subscription + updates all local state.
     Single db.commit() at the end — does NOT call sync_subscription_from_remnawave
@@ -106,6 +108,8 @@ async def complete_payment(
         str(user.remnawave_uuid),
         traffic_limit_bytes=0,  # unlimited — all paid plans
         expire_at=new_expire_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        internal_squad_uuids=paid_internal_squad_uuids,
+        external_squad_uuid=paid_external_squad_uuid,
     )
 
     # Upsert local subscription directly (no sync_subscription_from_remnawave)

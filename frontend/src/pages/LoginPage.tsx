@@ -37,10 +37,10 @@ function TelegramLoginButton({
   botUsername: string
   onAuth: (user: Record<string, unknown>) => void
 }) {
-  const ref = useRef<HTMLDivElement>(null)
+  const widgetRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!ref.current || !botUsername) return
+    if (!widgetRef.current || !botUsername) return
     ;(window as unknown as Record<string, unknown>).__onTelegramAuth = onAuth
 
     const script = document.createElement('script')
@@ -50,14 +50,14 @@ function TelegramLoginButton({
     script.setAttribute('data-onauth', '__onTelegramAuth(user)')
     script.setAttribute('data-request-access', 'write')
     script.async = true
-    ref.current.appendChild(script)
+    widgetRef.current.appendChild(script)
 
     const observer = new MutationObserver(() => {
-      const iframe = ref.current?.querySelector('iframe')
+      const iframe = widgetRef.current?.querySelector('iframe')
       if (!iframe) return
       observer.disconnect()
       const applyScale = () => {
-        const containerWidth = ref.current?.offsetWidth
+        const containerWidth = widgetRef.current?.offsetWidth
         const iframeWidth = iframe.offsetWidth
         if (!containerWidth || !iframeWidth) { requestAnimationFrame(applyScale); return }
         iframe.style.opacity = '0'
@@ -70,7 +70,7 @@ function TelegramLoginButton({
       }
       applyScale()
     })
-    observer.observe(ref.current, { childList: true, subtree: true })
+    observer.observe(widgetRef.current, { childList: true, subtree: true })
 
     return () => {
       observer.disconnect()
@@ -86,7 +86,7 @@ function TelegramLoginButton({
         </svg>
         Войти через Telegram
       </div>
-      <div ref={ref} className="absolute inset-0 overflow-hidden" />
+      <div ref={widgetRef} className="absolute inset-0 overflow-hidden" />
     </div>
   )
 }

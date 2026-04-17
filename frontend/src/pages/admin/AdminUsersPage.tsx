@@ -34,7 +34,7 @@ export default function AdminUsersPage() {
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
         <input
           type="text"
-          placeholder="Поиск по имени..."
+          placeholder="Поиск по имени, email, UUID, #ID..."
           value={search}
           onChange={(e) => handleSearch(e.target.value)}
           className="w-full rounded-input bg-surface border border-border-neutral pl-9 pr-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"

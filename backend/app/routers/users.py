@@ -175,7 +175,7 @@ async def link_telegram(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    bot_token = await get_setting(db, "telegram_bot_token")
+    bot_token = await get_setting_decrypted(db, "telegram_bot_token")
     if not bot_token:
         raise HTTPException(status_code=503, detail="Telegram OAuth not configured")
     try:
@@ -192,7 +192,12 @@ async def link_telegram(
         provider_username=tg_user.username,
     ))
     await db.commit()
-    return {"ok": True}
+
+    # Sync / merge subscription from Remnawave
+    from app.services.subscription_service import sync_remnawave_by_telegram_id
+    result = await sync_remnawave_by_telegram_id(db, current_user, tg_user.id, tg_user.username)
+
+    return {"ok": True, "notification": result.notification}
 
 
 @router.post("/me/providers/email", status_code=200)

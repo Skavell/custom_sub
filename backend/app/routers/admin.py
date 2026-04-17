@@ -7,7 +7,7 @@ from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import select, cast, or_, exists, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -98,7 +98,19 @@ async def list_users(
         .options(selectinload(User.auth_providers), selectinload(User.subscription))
     )
     if q:
-        stmt = stmt.where(User.display_name.ilike(f"%{q}%"))
+        q_norm = q.lstrip('#').lower()
+        email_exists = exists().where(
+            (AuthProvider.user_id == User.id)
+            & AuthProvider.provider_user_id.ilike(f"%{q}%")
+        )
+        stmt = stmt.where(
+            or_(
+                User.display_name.ilike(f"%{q}%"),
+                cast(User.id, String).ilike(f"{q_norm}%"),
+                cast(User.remnawave_uuid, String).ilike(f"%{q_norm}%"),
+                email_exists,
+            )
+        )
     if order == "asc":
         stmt = stmt.order_by(sort_col.asc())
     else:
@@ -508,7 +520,7 @@ async def admin_update_article(
         article.title = data.title
     if data.content is not None:
         article.content = data.content
-    if data.preview_image_url is not None:
+    if 'preview_image_url' in data.model_fields_set:
         article.preview_image_url = data.preview_image_url
     if data.sort_order is not None:
         article.sort_order = data.sort_order
