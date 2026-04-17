@@ -24,6 +24,7 @@ import AdminArticleEditPage from '@/pages/admin/AdminArticleEditPage'
 import AdminSettingsPage from '@/pages/admin/AdminSettingsPage'
 import AdminSupportMessagesPage from '@/pages/admin/AdminSupportMessagesPage'
 import VerifyEmailPage from '@/pages/VerifyEmailPage'
+import ResetPasswordPage from '@/pages/ResetPasswordPage'
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/auth/vk/callback" element={<VKCallbackPage />} />
 
         <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         {/* Admin routes */}
         <Route element={<AdminRoute />}>

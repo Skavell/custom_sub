@@ -10,25 +10,25 @@ class TokenType(str, enum.Enum):
     REFRESH = "refresh"
 
 
-def create_access_token(user_id: str, expires_delta: timedelta | None = None) -> str:
+def create_access_token(user_id: str, pwd_v: int = 0, expires_delta: timedelta | None = None) -> str:
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
     )
     return jwt.encode(
-        {"sub": user_id, "type": TokenType.ACCESS, "exp": expire},
+        {"sub": user_id, "type": TokenType.ACCESS, "exp": expire, "pwd_v": pwd_v},
         settings.secret_key,
         algorithm="HS256",
     )
 
 
-def create_refresh_token(user_id: str, expires_delta: timedelta | None = None) -> tuple[str, str]:
+def create_refresh_token(user_id: str, pwd_v: int = 0, expires_delta: timedelta | None = None) -> tuple[str, str]:
     """Returns (token, jti). The jti must be stored in Redis to enable rotation."""
     jti = str(uuid.uuid4())
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(days=settings.refresh_token_expire_days)
     )
     token = jwt.encode(
-        {"sub": user_id, "type": TokenType.REFRESH, "exp": expire, "jti": jti},
+        {"sub": user_id, "type": TokenType.REFRESH, "exp": expire, "jti": jti, "pwd_v": pwd_v},
         settings.secret_key,
         algorithm="HS256",
     )

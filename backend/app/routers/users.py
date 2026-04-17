@@ -1,17 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from redis.asyncio import Redis
 
 from app.database import get_db
 from app.deps import get_current_user
+from app.redis_client import get_redis
 from app.models.user import User
 from app.models.auth_provider import AuthProvider, ProviderType
-from app.schemas.user import UserProfileResponse, ProviderInfo
+from app.schemas.user import UserProfileResponse, ProviderInfo, ChangePasswordRequest, UpdateDisplayNameRequest
 from app.schemas.auth import GoogleOAuthRequest, VKOAuthRequest, TelegramOAuthRequest, LinkEmailRequest
 from app.services.auth.oauth.google import exchange_google_code
 from app.services.auth.oauth.vk import exchange_vk_code
 from app.services.auth.oauth.telegram import verify_telegram_data, parse_telegram_user
-from app.services.auth.password_service import hash_password
+from app.services.auth.password_service import hash_password, verify_password
 from app.services.setting_service import get_setting, get_setting_decrypted
 from app.config import settings as app_settings
 
@@ -42,6 +44,7 @@ async def get_me(
         id=str(current_user.id),
         display_name=current_user.display_name,
         is_admin=current_user.is_admin,
+        has_made_payment=current_user.has_made_payment,
         created_at=current_user.created_at,
         providers=[
             ProviderInfo(type=p.provider.value, username=p.provider_username, identifier=_provider_identifier(p))
@@ -213,5 +216,43 @@ async def link_email(
         password_hash=hash_password(data.password),
         email_verified=False,
     ))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.patch("/me/password", status_code=200)
+async def change_password(
+    data: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> dict:
+    result = await db.execute(
+        select(AuthProvider).where(
+            AuthProvider.user_id == current_user.id,
+            AuthProvider.provider == ProviderType.email,
+        )
+    )
+    provider = result.scalar_one_or_none()
+    if provider is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email-провайдер не привязан")
+    if not provider.password_hash:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пароль не установлен для этого провайдера")
+    if not verify_password(data.old_password, provider.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный текущий пароль")
+
+    provider.password_hash = hash_password(data.new_password)
+    await db.commit()
+    await redis.incr(f"user_pwd_version:{str(current_user.id)}")
+    return {"ok": True}
+
+
+@router.patch("/me", status_code=200)
+async def update_display_name(
+    data: UpdateDisplayNameRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    current_user.display_name = data.display_name
     await db.commit()
     return {"ok": True}

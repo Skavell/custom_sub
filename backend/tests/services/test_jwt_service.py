@@ -35,3 +35,21 @@ def test_expired_token_raises():
     token = create_access_token(user_id, expires_delta=timedelta(seconds=-1))
     with pytest.raises(ValueError, match="expired"):
         verify_token(token, TokenType.ACCESS)
+
+
+def test_access_token_contains_pwd_v():
+    token = create_access_token("some-user-id", pwd_v=3)
+    payload = verify_token(token, TokenType.ACCESS)
+    assert payload["pwd_v"] == 3
+
+
+def test_access_token_pwd_v_defaults_to_zero():
+    token = create_access_token("some-user-id")
+    payload = verify_token(token, TokenType.ACCESS)
+    assert payload.get("pwd_v", 0) == 0
+
+
+def test_refresh_token_contains_pwd_v():
+    token, _ = create_refresh_token("some-user-id", pwd_v=7)
+    payload = verify_token(token, TokenType.REFRESH)
+    assert payload["pwd_v"] == 7

@@ -39,3 +39,39 @@ async def send_verification_email(
             json=payload,
         )
         resp.raise_for_status()
+
+
+async def send_reset_email(
+    api_key: str,
+    from_address: str,
+    from_name: str,
+    to_email: str,
+    reset_url: str,
+) -> None:
+    """Send password reset link via Resend REST API."""
+    html = f"""
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+      <h2>Сброс пароля</h2>
+      <p>Нажмите кнопку ниже, чтобы сбросить пароль. Ссылка действительна 1 час.</p>
+      <a href="{reset_url}"
+         style="display:inline-block;padding:12px 24px;background:#06b6d4;color:#fff;text-decoration:none;border-radius:8px;font-weight:600">
+        Сбросить пароль
+      </a>
+      <p style="color:#888;font-size:12px;margin-top:24px">
+        Если вы не запрашивали сброс пароля — проигнорируйте это письмо.
+      </p>
+    </div>
+    """
+    payload = {
+        "from": f"{from_name} <{from_address}>",
+        "to": [to_email],
+        "subject": "Сброс пароля",
+        "html": html,
+    }
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        resp = await client.post(
+            _RESEND_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+        )
+        resp.raise_for_status()

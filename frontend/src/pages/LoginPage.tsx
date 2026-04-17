@@ -42,6 +42,7 @@ function TelegramLoginButton({
   useEffect(() => {
     if (!ref.current || !botUsername) return
     ;(window as unknown as Record<string, unknown>).__onTelegramAuth = onAuth
+
     const script = document.createElement('script')
     script.src = 'https://telegram.org/js/telegram-widget.js?22'
     script.setAttribute('data-telegram-login', botUsername)
@@ -50,15 +51,51 @@ function TelegramLoginButton({
     script.setAttribute('data-request-access', 'write')
     script.async = true
     ref.current.appendChild(script)
+
+    const observer = new MutationObserver(() => {
+      const iframe = ref.current?.querySelector('iframe')
+      if (!iframe) return
+      observer.disconnect()
+      const applyScale = () => {
+        const containerWidth = ref.current?.offsetWidth
+        const iframeWidth = iframe.offsetWidth
+        if (!containerWidth || !iframeWidth) { requestAnimationFrame(applyScale); return }
+        iframe.style.opacity = '0'
+        iframe.style.position = 'absolute'
+        iframe.style.top = '0'
+        iframe.style.left = '0'
+        iframe.style.transformOrigin = 'left top'
+        iframe.style.transform = `scaleX(${containerWidth / iframeWidth})`
+        iframe.style.cursor = 'pointer'
+      }
+      applyScale()
+    })
+    observer.observe(ref.current, { childList: true, subtree: true })
+
     return () => {
+      observer.disconnect()
       delete (window as unknown as Record<string, unknown>).__onTelegramAuth
     }
   }, [botUsername, onAuth])
 
-  return <div ref={ref} className="flex justify-center" />
+  return (
+    <div className="group relative h-[42px]">
+      <div className="absolute inset-0 flex items-center justify-center gap-2.5 rounded-input border border-border-neutral bg-background text-sm text-text-primary hover:border-border-accent pointer-events-none select-none transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16">
+          <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0M8.287 5.906q-1.168.486-4.666 2.01-.567.225-.595.442c-.03.243.275.339.69.47l.175.055c.408.133.958.288 1.243.294q.39.01.868-.32 3.269-2.206 3.374-2.23c.05-.012.12-.026.166.016s.042.12.037.141c-.03.129-1.227 1.241-1.846 1.817-.193.18-.33.307-.358.336a8 8 0 0 1-.188.186c-.38.366-.664.64.015 1.088.327.216.589.393.85.571.284.194.568.387.936.629q.14.092.27.187c.331.236.63.448.997.414.214-.02.435-.22.547-.82.265-1.417.786-4.486.906-5.751a1.4 1.4 0 0 0-.013-.315.34.34 0 0 0-.114-.217.53.53 0 0 0-.31-.093c-.3.005-.763.166-2.984 1.09" fill="#2AABEE"/>
+        </svg>
+        Войти через Telegram
+      </div>
+      <div ref={ref} className="absolute inset-0 overflow-hidden" />
+    </div>
+  )
 }
 
-type Mode = 'login' | 'register'
+function isStrongPassword(p: string) {
+  return p.length >= 8 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /[0-9]/.test(p)
+}
+
+type Mode = 'login' | 'register' | 'forgot' | 'reset-sent'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -68,6 +105,7 @@ export default function LoginPage() {
   const [displayName, setDisplayName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [forgotEmail, setForgotEmail] = useState('')
 
   const { data: oauthConfig } = useQuery<OAuthConfigResponse>({
     queryKey: ['oauth-config'],
@@ -106,6 +144,26 @@ export default function LoginPage() {
       navigate('/', { replace: true })
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : 'Ошибка сети')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleForgotSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      await api.post('/api/auth/reset-password/request', { email: forgotEmail })
+      setMode('reset-sent')
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setError('Email не найден')
+      } else if (err instanceof ApiError && err.status === 429) {
+        setError('Слишком много попыток. Попробуйте позже.')
+      } else {
+        setError('Ошибка сети')
+      }
     } finally {
       setLoading(false)
     }
@@ -163,7 +221,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {oauthConfig?.email_enabled !== false && (
+        {(mode === 'login' || mode === 'register') && oauthConfig?.email_enabled !== false && (
         <div className="flex gap-2 mb-6">
           <button
             type="button"
@@ -186,7 +244,7 @@ export default function LoginPage() {
         </div>
         )}
 
-        {oauthConfig?.email_enabled !== false && <form onSubmit={handleSubmit} className="space-y-4">
+        {(mode === 'login' || mode === 'register') && oauthConfig?.email_enabled !== false && <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'register' && (
             <div>
               <label className="block text-sm text-text-secondary mb-1">Имя</label>
@@ -222,7 +280,21 @@ export default function LoginPage() {
               className="w-full bg-background border border-border-neutral rounded-input px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
               placeholder="Минимум 8 символов"
             />
+            {mode === 'register' && password && !isStrongPassword(password) && (
+              <p className="mt-1 text-xs text-text-muted">Мин. 8 символов, заглавная буква, строчная буква, цифра</p>
+            )}
           </div>
+          {mode === 'login' && (
+            <div className="text-right">
+              <button
+                type="button"
+                onClick={() => { setMode('forgot'); setError(null); setForgotEmail(email) }}
+                className="text-xs text-text-muted hover:text-accent transition-colors"
+              >
+                Забыли пароль?
+              </button>
+            </div>
+          )}
           {error && <p className="text-sm text-red-400">{error}</p>}
           <button
             type="submit"
@@ -232,6 +304,52 @@ export default function LoginPage() {
             {loading ? 'Загрузка...' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
           </button>
         </form>}
+
+        {mode === 'forgot' && (
+          <form onSubmit={handleForgotSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm text-text-secondary mb-1">Email</label>
+              <input
+                type="email"
+                value={forgotEmail}
+                onChange={e => setForgotEmail(e.target.value)}
+                required
+                className="w-full bg-background border border-border-neutral rounded-input px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                placeholder="you@example.com"
+              />
+            </div>
+            {error && <p className="text-sm text-red-400">{error}</p>}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2 rounded-input bg-accent text-background font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {loading ? 'Отправка...' : 'Отправить письмо'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('login'); setError(null) }}
+              className="w-full text-sm text-text-muted hover:text-text-primary transition-colors"
+            >
+              ← Назад к входу
+            </button>
+          </form>
+        )}
+
+        {mode === 'reset-sent' && (
+          <div className="space-y-4">
+            <p className="text-sm text-text-secondary">
+              Если адрес <span className="text-text-primary font-medium">{forgotEmail}</span> зарегистрирован, письмо со ссылкой для сброса пароля было отправлено.
+            </p>
+            <button
+              type="button"
+              onClick={() => { setMode('login'); setError(null) }}
+              className="w-full py-2 rounded-input bg-surface border border-border-neutral text-sm text-text-primary hover:border-accent transition-colors"
+            >
+              ← Назад к входу
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

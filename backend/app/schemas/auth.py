@@ -1,4 +1,16 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, Field
+
+
+def validate_password_strength(v: str) -> str:
+    if len(v) < 8:
+        raise ValueError("Пароль должен содержать не менее 8 символов")
+    if not any(c.isupper() for c in v):
+        raise ValueError("Пароль должен содержать хотя бы одну заглавную букву")
+    if not any(c.islower() for c in v):
+        raise ValueError("Пароль должен содержать хотя бы одну строчную букву")
+    if not any(c.isdigit() for c in v):
+        raise ValueError("Пароль должен содержать хотя бы одну цифру")
+    return v
 
 
 class EmailRegisterRequest(BaseModel):
@@ -18,9 +30,7 @@ class EmailRegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
+        return validate_password_strength(v)
 
 
 class EmailLoginRequest(BaseModel):
@@ -74,6 +84,18 @@ class LinkEmailRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
+        return validate_password_strength(v)
+
+
+class ResetPasswordRequestSchema(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordConfirmSchema(BaseModel):
+    token: str = Field(min_length=1)
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _validate_new_password(cls, v: str) -> str:
+        return validate_password_strength(v)

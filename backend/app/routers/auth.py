@@ -1,4 +1,5 @@
 import logging
+import secrets
 import uuid as _uuid
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
 from fastapi.responses import RedirectResponse
@@ -8,9 +9,9 @@ from sqlalchemy import select as _select
 
 from app.database import get_db
 from app.redis_client import get_redis
-from app.schemas.auth import EmailRegisterRequest, EmailLoginRequest, TokenResponse, TelegramOAuthRequest, GoogleOAuthRequest, VKOAuthRequest, OAuthConfigResponse
+from app.schemas.auth import EmailRegisterRequest, EmailLoginRequest, TokenResponse, TelegramOAuthRequest, GoogleOAuthRequest, VKOAuthRequest, OAuthConfigResponse, ResetPasswordRequestSchema, ResetPasswordConfirmSchema
 from app.services.auth.jwt_service import create_access_token, create_refresh_token, verify_token, TokenType
-from app.services.auth.password_service import verify_password
+from app.services.auth.password_service import verify_password, hash_password
 from app.services.user_service import create_user_with_provider, get_user_by_email, get_user_by_provider
 from app.models.auth_provider import ProviderType
 from app.models.user import User
@@ -20,7 +21,7 @@ from app.services.auth.oauth.telegram import verify_telegram_data, parse_telegra
 from app.services.auth.oauth.google import exchange_google_code
 from app.services.auth.oauth.vk import exchange_vk_code
 from app.services.setting_service import get_setting, get_setting_decrypted
-from app.services.email_service import send_verification_email
+from app.services.email_service import send_verification_email, send_reset_email
 from app.services.rate_limiter import check_rate_limit
 from app.models.auth_provider import AuthProvider
 
@@ -64,12 +65,14 @@ COOKIE_OPTS = {
 
 async def _set_auth_cookies(response: Response, user_id: str, redis: Redis) -> None:
     """Issue access + refresh tokens, store refresh jti in Redis for rotation."""
-    access = create_access_token(str(user_id))
-    refresh, jti = create_refresh_token(str(user_id))
+    raw = await redis.get(f"user_pwd_version:{user_id}")
+    pwd_v = int(raw) if raw else 0
+    access = create_access_token(user_id, pwd_v=pwd_v)
+    refresh, jti = create_refresh_token(user_id, pwd_v=pwd_v)
     await redis.setex(
         f"refresh_jti:{jti}",
         settings.refresh_token_expire_days * 86400,
-        str(user_id),
+        user_id,
     )
     response.set_cookie("access_token", access, max_age=settings.access_token_expire_minutes * 60, **COOKIE_OPTS)
     response.set_cookie("refresh_token", refresh, max_age=settings.refresh_token_expire_days * 86400, **COOKIE_OPTS)
@@ -220,6 +223,13 @@ async def refresh(
 
     if user.is_banned:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Аккаунт заблокирован")
+
+    # Reject if password was changed after this refresh token was issued
+    token_pwd_v = int(payload.get("pwd_v", 0))
+    stored_raw = await redis.get(f"user_pwd_version:{str(user.id)}")
+    stored_pwd_v = int(stored_raw) if stored_raw else 0
+    if token_pwd_v != stored_pwd_v:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session invalidated")
 
     await _set_auth_cookies(response, str(user.id), redis)
     return TokenResponse(user_id=str(user.id), display_name=user.display_name)
@@ -403,3 +413,84 @@ async def confirm_verify_email(
 
     await redis.delete(f"verify_email:{token}")
     return RedirectResponse(url=f"{frontend_url}/verify-email?verified=1", status_code=302)
+
+
+@router.post("/reset-password/request")
+async def reset_password_request(
+    data: ResetPasswordRequestSchema,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    email_lower = data.email.lower()
+    rate_key = f"reset_pwd_rate:{email_lower}"
+    if not await check_rate_limit(redis, rate_key, 3, 3600):
+        raise HTTPException(status_code=429, detail="Слишком много попыток. Попробуйте позже.")
+
+    result = await db.execute(
+        _select(AuthProvider).where(
+            AuthProvider.provider == ProviderType.email,
+            AuthProvider.provider_user_id == email_lower,
+        )
+    )
+    provider = result.scalar_one_or_none()
+    if provider is None:
+        raise HTTPException(status_code=404, detail="Email не найден")
+
+    api_key = await get_setting_decrypted(db, "resend_api_key")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Email-сервис не настроен")
+    from_address = await get_setting(db, "email_from_address") or "noreply@example.com"
+    from_name = await get_setting(db, "email_from_name") or "VPN Service"
+
+    token = secrets.token_urlsafe(32)
+    await redis.setex(f"reset_pwd:{token}", 3600, str(provider.user_id))
+
+    site_url = settings.frontend_url.rstrip("/")
+    reset_url = f"{site_url}/reset-password?token={token}"
+
+    try:
+        await send_reset_email(
+            api_key=api_key,
+            from_address=from_address,
+            from_name=from_name,
+            to_email=email_lower,
+            reset_url=reset_url,
+        )
+    except Exception as exc:
+        logger.exception("Failed to send reset email: %s", exc)
+        raise HTTPException(status_code=503, detail="Ошибка отправки письма")
+
+    return {"ok": True}
+
+
+@router.post("/reset-password/confirm")
+async def reset_password_confirm(
+    data: ResetPasswordConfirmSchema,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    user_id_raw = await redis.get(f"reset_pwd:{data.token}")
+    if not user_id_raw:
+        raise HTTPException(status_code=400, detail="Ссылка недействительна или истекла")
+
+    user_id_str = user_id_raw if isinstance(user_id_raw, str) else user_id_raw.decode()
+    try:
+        user_uuid = _uuid.UUID(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ссылка недействительна или истекла")
+
+    result = await db.execute(
+        _select(AuthProvider).where(
+            AuthProvider.user_id == user_uuid,
+            AuthProvider.provider == ProviderType.email,
+        )
+    )
+    provider = result.scalar_one_or_none()
+    if provider:
+        provider.password_hash = hash_password(data.new_password)
+        await db.commit()
+
+    await redis.delete(f"reset_pwd:{data.token}")
+    await redis.incr(f"user_pwd_version:{user_id_str}")
+
+    return {"ok": True}
