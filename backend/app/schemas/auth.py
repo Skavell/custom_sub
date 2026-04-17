@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, Field
 
 
 def validate_password_strength(v: str) -> str:
@@ -84,4 +84,18 @@ class LinkEmailRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+
+
+class ResetPasswordRequestSchema(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordConfirmSchema(BaseModel):
+    token: str = Field(min_length=1)
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _validate_new_password(cls, v: str) -> str:
         return validate_password_strength(v)
