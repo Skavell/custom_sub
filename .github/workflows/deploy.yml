@@ -58,8 +58,8 @@ jobs:
       - run: npm run type-check
       - run: npm run build
         env:
-          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}  # ← бэкается в бандл
-	  VITE_UPTIME_KUMA_BASE: ${{ secrets.VITE_UPTIME_KUMA_BASE }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_UPTIME_KUMA_BASE: ${{ secrets.VITE_UPTIME_KUMA_BASE }}
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
