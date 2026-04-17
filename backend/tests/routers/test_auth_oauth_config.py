@@ -10,10 +10,12 @@ async def test_oauth_config_all_disabled():
     with (
         patch("app.routers.auth.settings") as mock_settings,
         patch("app.routers.auth.get_setting", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.auth.get_setting_decrypted", new_callable=AsyncMock) as mock_get_dec,
     ):
         mock_settings.google_client_id = ""
         mock_settings.vk_client_id = ""
         mock_get.return_value = None
+        mock_get_dec.return_value = None
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get("/api/auth/oauth-config")
@@ -32,10 +34,12 @@ async def test_oauth_config_google_enabled():
     with (
         patch("app.routers.auth.settings") as mock_settings,
         patch("app.routers.auth.get_setting", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.auth.get_setting_decrypted", new_callable=AsyncMock) as mock_get_dec,
     ):
         mock_settings.google_client_id = "some-client-id"
         mock_settings.vk_client_id = ""
         mock_get.return_value = None
+        mock_get_dec.return_value = None
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get("/api/auth/oauth-config")
@@ -50,10 +54,12 @@ async def test_oauth_config_has_email_verification_required():
     with (
         patch("app.routers.auth.settings") as mock_settings,
         patch("app.routers.auth.get_setting", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.auth.get_setting_decrypted", new_callable=AsyncMock) as mock_get_dec,
     ):
         mock_settings.google_client_id = ""
         mock_settings.vk_client_id = ""
         mock_get.return_value = None
+        mock_get_dec.return_value = None
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get("/api/auth/oauth-config")
@@ -68,15 +74,19 @@ async def test_oauth_config_has_email_verification_required():
 async def test_oauth_config_telegram_enabled_with_username():
     """When telegram_bot_token is in DB and bot_username set, telegram=true with username."""
     async def mock_get(db, key):
-        if key == "telegram_bot_token":
-            return "some-token"
         if key == "telegram_bot_username":
             return "mybot"
+        return None
+
+    async def mock_get_dec(db, key):
+        if key == "telegram_bot_token":
+            return "some-token"
         return None
 
     with (
         patch("app.routers.auth.settings") as mock_settings,
         patch("app.routers.auth.get_setting", side_effect=mock_get),
+        patch("app.routers.auth.get_setting_decrypted", side_effect=mock_get_dec),
     ):
         mock_settings.google_client_id = ""
         mock_settings.vk_client_id = ""
