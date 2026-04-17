@@ -91,7 +91,11 @@ function TelegramLoginButton({
   )
 }
 
-type Mode = 'login' | 'register'
+function isStrongPassword(p: string) {
+  return p.length >= 8 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /[0-9]/.test(p)
+}
+
+type Mode = 'login' | 'register' | 'forgot' | 'reset-sent'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -101,6 +105,7 @@ export default function LoginPage() {
   const [displayName, setDisplayName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [forgotEmail, setForgotEmail] = useState('')
 
   const { data: oauthConfig } = useQuery<OAuthConfigResponse>({
     queryKey: ['oauth-config'],
@@ -139,6 +144,26 @@ export default function LoginPage() {
       navigate('/', { replace: true })
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : 'Ошибка сети')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleForgotSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      await api.post('/api/auth/reset-password/request', { email: forgotEmail })
+      setMode('reset-sent')
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setError('Email не найден')
+      } else if (err instanceof ApiError && err.status === 429) {
+        setError('Слишком много попыток. Попробуйте позже.')
+      } else {
+        setError('Ошибка сети')
+      }
     } finally {
       setLoading(false)
     }
@@ -196,7 +221,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {oauthConfig?.email_enabled !== false && (
+        {(mode === 'login' || mode === 'register') && oauthConfig?.email_enabled !== false && (
         <div className="flex gap-2 mb-6">
           <button
             type="button"
@@ -219,7 +244,7 @@ export default function LoginPage() {
         </div>
         )}
 
-        {oauthConfig?.email_enabled !== false && <form onSubmit={handleSubmit} className="space-y-4">
+        {(mode === 'login' || mode === 'register') && oauthConfig?.email_enabled !== false && <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'register' && (
             <div>
               <label className="block text-sm text-text-secondary mb-1">Имя</label>
@@ -255,7 +280,21 @@ export default function LoginPage() {
               className="w-full bg-background border border-border-neutral rounded-input px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
               placeholder="Минимум 8 символов"
             />
+            {mode === 'register' && password && !isStrongPassword(password) && (
+              <p className="mt-1 text-xs text-text-muted">Мин. 8 символов, заглавная буква, строчная буква, цифра</p>
+            )}
           </div>
+          {mode === 'login' && (
+            <div className="text-right">
+              <button
+                type="button"
+                onClick={() => { setMode('forgot'); setError(null); setForgotEmail(email) }}
+                className="text-xs text-text-muted hover:text-accent transition-colors"
+              >
+                Забыли пароль?
+              </button>
+            </div>
+          )}
           {error && <p className="text-sm text-red-400">{error}</p>}
           <button
             type="submit"
@@ -265,6 +304,52 @@ export default function LoginPage() {
             {loading ? 'Загрузка...' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
           </button>
         </form>}
+
+        {mode === 'forgot' && (
+          <form onSubmit={handleForgotSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm text-text-secondary mb-1">Email</label>
+              <input
+                type="email"
+                value={forgotEmail}
+                onChange={e => setForgotEmail(e.target.value)}
+                required
+                className="w-full bg-background border border-border-neutral rounded-input px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                placeholder="you@example.com"
+              />
+            </div>
+            {error && <p className="text-sm text-red-400">{error}</p>}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2 rounded-input bg-accent text-background font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {loading ? 'Отправка...' : 'Отправить письмо'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('login'); setError(null) }}
+              className="w-full text-sm text-text-muted hover:text-text-primary transition-colors"
+            >
+              ← Назад к входу
+            </button>
+          </form>
+        )}
+
+        {mode === 'reset-sent' && (
+          <div className="space-y-4">
+            <p className="text-sm text-text-secondary">
+              Если адрес <span className="text-text-primary font-medium">{forgotEmail}</span> зарегистрирован, письмо со ссылкой для сброса пароля было отправлено.
+            </p>
+            <button
+              type="button"
+              onClick={() => { setMode('login'); setError(null) }}
+              className="w-full py-2 rounded-input bg-surface border border-border-neutral text-sm text-text-primary hover:border-accent transition-colors"
+            >
+              ← Назад к входу
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
