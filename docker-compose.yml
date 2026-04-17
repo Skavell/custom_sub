@@ -19,7 +19,8 @@ services:
       - VK_CLIENT_ID=${VK_CLIENT_ID}
       - VK_CLIENT_SECRET=${VK_CLIENT_SECRET}
       - ENVIRONMENT=production
-      - FRONTEND_URL=${FRONTEND_URL:-https://my.skavellion.lol}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - SITE_URL=${SITE_URL}
     depends_on:
       postgres:
         condition: service_healthy
