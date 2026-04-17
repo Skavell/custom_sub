@@ -30,3 +30,5 @@ redis_data/
 # Project specific
 .superpowers/
 .worktrees/
+docs/
+frontend/tsconfig.app.tsbuildinfo
