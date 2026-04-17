@@ -40,7 +40,7 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
           REDIS_URL: redis://localhost:6379
           SECRET_KEY: test-secret-key-32-chars-minimum!
-          SETTINGS_ENCRYPTION_KEY: test-enc-key-32-chars-minimum!!
+          SETTINGS_ENCRYPTION_KEY: test-enc-key-32-chars-minimum!!!
 
   build-frontend:
     runs-on: ubuntu-latest
