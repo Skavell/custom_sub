@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query'
-import { User, Trash2, Clock, Loader2, CheckCircle, XCircle, AlertCircle, Plus, Pencil, Check, X } from 'lucide-react'
+import { User, Trash2, Clock, Loader2, CheckCircle, XCircle, AlertCircle, Plus, Pencil, Check, X, KeyRound } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useTransactions } from '@/hooks/useTransactions'
 import { api, ApiError } from '@/lib/api'
@@ -26,6 +26,10 @@ const TX_TYPE_LABELS: Record<string, string> = {
   payment: 'Оплата',
   promo_bonus: 'Промокод',
   manual: 'Вручную',
+}
+
+function isStrongPassword(p: string) {
+  return p.length >= 8 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /[0-9]/.test(p)
 }
 
 function TxStatusIcon({ status }: { status: string }) {
@@ -171,6 +175,25 @@ export default function ProfilePage() {
   const [linkTelegramError, setLinkTelegramError] = useState<string | null>(null)
   const [linkTelegramNotification, setLinkTelegramNotification] = useState<string | null>(null)
 
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false)
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
+  const [changePasswordError, setChangePasswordError] = useState<string | null>(null)
+
+  const changePasswordMutation = useMutation({
+    mutationFn: ({ old_password, new_password }: { old_password: string; new_password: string }) =>
+      api.patch('/api/users/me/password', { old_password, new_password }),
+    onSuccess: () => {
+      setChangePasswordOpen(false)
+      setOldPassword('')
+      setNewPassword('')
+      setConfirmNewPassword('')
+      setChangePasswordError(null)
+    },
+    onError: (e) => setChangePasswordError(e instanceof ApiError ? e.detail : 'Ошибка'),
+  })
+
   const linkEmailMutation = useMutation({
     mutationFn: ({ email, password }: { email: string; password: string }) =>
       api.post('/api/users/me/providers/email', { email, password }),
@@ -292,31 +315,96 @@ export default function ProfilePage() {
         ) : (
           <div className="space-y-2">
             {user.providers.map((p) => (
-              <div
-                key={p.type}
-                className="flex items-center justify-between rounded-input bg-white/5 px-3 py-2.5"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <span className={cn('text-sm font-medium shrink-0', PROVIDER_COLORS[p.type] ?? 'text-text-secondary')}>
-                    {PROVIDER_LABELS[p.type] ?? p.type}
-                  </span>
-                  {p.identifier && (
-                    <span className="text-xs text-text-muted truncate">{p.identifier}</span>
-                  )}
-                </div>
-                {canUnlink && (
-                  <button
-                    onClick={() => unlinkMutation.mutate(p.type)}
-                    disabled={unlinkMutation.isPending}
-                    className="text-text-muted hover:text-red-400 transition-colors disabled:opacity-50"
-                    title="Отвязать"
-                  >
-                    {unlinkMutation.isPending ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Trash2 size={14} />
+              <div key={p.type}>
+                <div
+                  className="flex items-center justify-between rounded-input bg-white/5 px-3 py-2.5"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className={cn('text-sm font-medium shrink-0', PROVIDER_COLORS[p.type] ?? 'text-text-secondary')}>
+                      {PROVIDER_LABELS[p.type] ?? p.type}
+                    </span>
+                    {p.identifier && (
+                      <span className="text-xs text-text-muted truncate">{p.identifier}</span>
                     )}
-                  </button>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {p.type === 'email' && (
+                      <button
+                        onClick={() => { setChangePasswordOpen(v => !v); setChangePasswordError(null) }}
+                        className="text-text-muted hover:text-accent transition-colors"
+                        title="Изменить пароль"
+                      >
+                        <KeyRound size={14} />
+                      </button>
+                    )}
+                    {canUnlink && (
+                      <button
+                        onClick={() => unlinkMutation.mutate(p.type)}
+                        disabled={unlinkMutation.isPending}
+                        className="text-text-muted hover:text-red-400 transition-colors disabled:opacity-50"
+                        title="Отвязать"
+                      >
+                        {unlinkMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {p.type === 'email' && changePasswordOpen && (
+                  <div className="mt-2 space-y-2">
+                    <input
+                      type="password"
+                      value={oldPassword}
+                      onChange={e => setOldPassword(e.target.value)}
+                      placeholder="Текущий пароль"
+                      className="w-full rounded-input bg-background border border-border-neutral px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                    />
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      placeholder="Новый пароль"
+                      className="w-full rounded-input bg-background border border-border-neutral px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                    />
+                    {newPassword && !isStrongPassword(newPassword) && (
+                      <p className="text-xs text-text-muted">Мин. 8 символов, заглавная, строчная, цифра</p>
+                    )}
+                    <input
+                      type="password"
+                      value={confirmNewPassword}
+                      onChange={e => setConfirmNewPassword(e.target.value)}
+                      placeholder="Повторите новый пароль"
+                      className="w-full rounded-input bg-background border border-border-neutral px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                    />
+                    {confirmNewPassword && newPassword !== confirmNewPassword && (
+                      <p className="text-xs text-red-400">Пароли не совпадают</p>
+                    )}
+                    {changePasswordError && <p className="text-xs text-red-400">{changePasswordError}</p>}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          if (!isStrongPassword(newPassword)) {
+                            setChangePasswordError('Пароль должен содержать не менее 8 символов, заглавную букву, строчную букву и цифру')
+                            return
+                          }
+                          if (newPassword !== confirmNewPassword) {
+                            setChangePasswordError('Пароли не совпадают')
+                            return
+                          }
+                          changePasswordMutation.mutate({ old_password: oldPassword, new_password: newPassword })
+                        }}
+                        disabled={changePasswordMutation.isPending || !oldPassword || !newPassword || !confirmNewPassword}
+                        className="flex-1 py-1.5 rounded-input bg-accent text-background text-xs font-medium disabled:opacity-50"
+                      >
+                        {changePasswordMutation.isPending ? 'Сохранение…' : 'Сохранить'}
+                      </button>
+                      <button
+                        onClick={() => { setChangePasswordOpen(false); setChangePasswordError(null); setOldPassword(''); setNewPassword(''); setConfirmNewPassword('') }}
+                        className="px-3 py-1.5 rounded-input bg-white/5 text-text-secondary text-xs"
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             ))}
