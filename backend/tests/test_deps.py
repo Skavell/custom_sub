@@ -39,6 +39,7 @@ async def test_get_current_user_banned_raises_403():
 
     redis = AsyncMock()
     redis.exists = AsyncMock(return_value=0)  # not blacklisted
+    redis.get = AsyncMock(return_value=None)  # no stored pwd_v — defaults to 0
 
     db = AsyncMock()
     result = MagicMock()
@@ -94,3 +95,57 @@ async def test_refresh_endpoint_banned_user_returns_403():
 
     assert resp.status_code == status.HTTP_403_FORBIDDEN
     assert resp.json()["detail"] == "Аккаунт заблокирован"
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_invalidated_session_raises_401():
+    """Token with stale pwd_v is rejected."""
+    user_id = str(uuid.uuid4())
+    # Token issued with pwd_v=1
+    token = create_access_token(user_id, pwd_v=1)
+
+    user = MagicMock(spec=User)
+    user.id = uuid.UUID(user_id)
+    user.is_banned = False
+
+    redis = AsyncMock()
+    redis.exists = AsyncMock(return_value=0)  # not blacklisted
+    redis.get = AsyncMock(return_value=b"2")  # stored version is 2 — mismatch
+
+    db = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = user
+    db.execute = AsyncMock(return_value=result)
+
+    request = MagicMock(spec=Request)
+    request.cookies = {"access_token": token}
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(request=request, db=db, redis=redis)
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_matching_pwd_v_succeeds():
+    """Token with matching pwd_v is accepted."""
+    user_id = str(uuid.uuid4())
+    token = create_access_token(user_id, pwd_v=2)
+
+    user = MagicMock(spec=User)
+    user.id = uuid.UUID(user_id)
+    user.is_banned = False
+
+    redis = AsyncMock()
+    redis.exists = AsyncMock(return_value=0)  # not blacklisted
+    redis.get = AsyncMock(return_value=b"2")  # matching version
+
+    db = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = user
+    db.execute = AsyncMock(return_value=result)
+
+    request = MagicMock(spec=Request)
+    request.cookies = {"access_token": token}
+
+    result_user = await get_current_user(request=request, db=db, redis=redis)
+    assert result_user is user

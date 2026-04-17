@@ -30,6 +30,13 @@ async def get_current_user(
     if await redis.exists(f"blacklist:{token}"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked", headers=_401)
 
+    # Session version check — reject if password was changed after token was issued
+    token_pwd_v = int(payload.get("pwd_v", 0))
+    stored_raw = await redis.get(f"user_pwd_version:{payload['sub']}")
+    stored_pwd_v = int(stored_raw) if stored_raw else 0
+    if token_pwd_v != stored_pwd_v:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session invalidated", headers=_401)
+
     # payload["sub"] is guaranteed by verify_token, but UUID parse can still fail on malformed input
     try:
         user_uuid = uuid.UUID(payload["sub"])

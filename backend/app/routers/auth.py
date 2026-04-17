@@ -64,12 +64,14 @@ COOKIE_OPTS = {
 
 async def _set_auth_cookies(response: Response, user_id: str, redis: Redis) -> None:
     """Issue access + refresh tokens, store refresh jti in Redis for rotation."""
-    access = create_access_token(str(user_id))
-    refresh, jti = create_refresh_token(str(user_id))
+    raw = await redis.get(f"user_pwd_version:{user_id}")
+    pwd_v = int(raw) if raw else 0
+    access = create_access_token(user_id, pwd_v=pwd_v)
+    refresh, jti = create_refresh_token(user_id, pwd_v=pwd_v)
     await redis.setex(
         f"refresh_jti:{jti}",
         settings.refresh_token_expire_days * 86400,
-        str(user_id),
+        user_id,
     )
     response.set_cookie("access_token", access, max_age=settings.access_token_expire_minutes * 60, **COOKIE_OPTS)
     response.set_cookie("refresh_token", refresh, max_age=settings.refresh_token_expire_days * 86400, **COOKIE_OPTS)
@@ -220,6 +222,13 @@ async def refresh(
 
     if user.is_banned:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Аккаунт заблокирован")
+
+    # Reject if password was changed after this refresh token was issued
+    token_pwd_v = int(payload.get("pwd_v", 0))
+    stored_raw = await redis.get(f"user_pwd_version:{str(user.id)}")
+    stored_pwd_v = int(stored_raw) if stored_raw else 0
+    if token_pwd_v != stored_pwd_v:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session invalidated")
 
     await _set_auth_cookies(response, str(user.id), redis)
     return TokenResponse(user_id=str(user.id), display_name=user.display_name)
