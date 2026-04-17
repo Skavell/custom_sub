@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 // The group whose monitors show ping instead of uptime
 const PING_GROUP_NAME = 'Сервера'
 
-const UPTIME_KUMA_BASE = 'https://status.example.com'
+const UPTIME_KUMA_BASE = import.meta.env.VITE_UPTIME_KUMA_BASE as string ?? ''
 const STATUS_PAGE_SLUG = 'nodes'
 
 // ── Types ────────────────────────────────────────────────────────────────────
