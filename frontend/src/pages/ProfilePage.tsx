@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query'
-import { User, Trash2, Clock, Loader2, CheckCircle, XCircle, AlertCircle, Plus } from 'lucide-react'
+import { User, Trash2, Clock, Loader2, CheckCircle, XCircle, AlertCircle, Plus, Pencil, Check, X } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useTransactions } from '@/hooks/useTransactions'
 import { api, ApiError } from '@/lib/api'
@@ -150,6 +150,20 @@ export default function ProfilePage() {
     staleTime: 5 * 60_000,
   })
 
+  const [isEditingName, setIsEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [nameError, setNameError] = useState<string | null>(null)
+
+  const updateNameMutation = useMutation({
+    mutationFn: (display_name: string) => api.patch('/api/users/me', { display_name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['me'] })
+      setIsEditingName(false)
+      setNameError(null)
+    },
+    onError: (e) => setNameError(e instanceof ApiError ? e.detail : 'Ошибка'),
+  })
+
   const [showEmailForm, setShowEmailForm] = useState(false)
   const [linkEmail, setLinkEmail] = useState('')
   const [linkPassword, setLinkPassword] = useState('')
@@ -202,7 +216,57 @@ export default function ProfilePage() {
             {user.display_name[0].toUpperCase()}
           </div>
           <div>
-            <p className="font-semibold text-text-primary">{user.display_name}</p>
+            {isEditingName ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={nameInput}
+                  onChange={e => setNameInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      const trimmed = nameInput.trim()
+                      if (!trimmed) { setNameError('Имя не может быть пустым'); return }
+                      if (trimmed.length > 64) { setNameError('Не более 64 символов'); return }
+                      updateNameMutation.mutate(trimmed)
+                    }
+                    if (e.key === 'Escape') { setIsEditingName(false); setNameError(null) }
+                  }}
+                  autoFocus
+                  maxLength={64}
+                  className="bg-background border border-border-neutral rounded-input px-2 py-0.5 text-sm text-text-primary focus:outline-none focus:border-accent font-semibold"
+                />
+                <button
+                  onClick={() => {
+                    const trimmed = nameInput.trim()
+                    if (!trimmed) { setNameError('Имя не может быть пустым'); return }
+                    if (trimmed.length > 64) { setNameError('Не более 64 символов'); return }
+                    updateNameMutation.mutate(trimmed)
+                  }}
+                  disabled={updateNameMutation.isPending}
+                  className="text-accent hover:text-accent/80 transition-colors disabled:opacity-50"
+                >
+                  {updateNameMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                </button>
+                <button
+                  onClick={() => { setIsEditingName(false); setNameError(null) }}
+                  className="text-text-muted hover:text-text-primary transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <p className="font-semibold text-text-primary">{user.display_name}</p>
+                <button
+                  onClick={() => { setNameInput(user.display_name); setIsEditingName(true); setNameError(null) }}
+                  className="text-text-muted hover:text-text-primary transition-colors"
+                >
+                  <Pencil size={13} />
+                </button>
+              </div>
+            )}
+            {nameError && <p className="text-xs text-red-400 mt-0.5">{nameError}</p>}
             <p className="text-xs text-text-muted">#{shortId}</p>
           </div>
         </div>
