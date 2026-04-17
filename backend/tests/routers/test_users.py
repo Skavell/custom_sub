@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient, ASGITransport
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.main import app
 from app.deps import get_current_user
 from app.database import get_db
+from app.redis_client import get_redis
 from app.models.auth_provider import AuthProvider, ProviderType
 from app.models.user import User
 
@@ -67,6 +68,20 @@ def _override_get_current_user(user: User):
     async def _get_current_user_override():
         return user
     return _get_current_user_override
+
+
+def _override_db(db):
+    """Return an async generator factory that yields the given db mock."""
+    async def _get_db_override():
+        yield db
+    return _get_db_override
+
+
+def _override_redis(redis):
+    """Return an async generator factory that yields the given redis mock."""
+    async def _get_redis_override():
+        yield redis
+    return _get_redis_override
 
 
 # ---------------------------------------------------------------------------
@@ -251,4 +266,133 @@ async def test_delete_invalid_provider_name():
     finally:
         app.dependency_overrides.clear()
 
+    assert resp.status_code == 422
+
+
+# --- change password tests ---
+
+@pytest.mark.asyncio
+async def test_change_password_no_email_provider_returns_400():
+    user = _make_user()
+    db = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None  # no email provider
+    db.execute = AsyncMock(return_value=result)
+    redis = AsyncMock()
+    redis.get = AsyncMock(return_value=b"0")  # pwd_v check in get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_db] = _override_db(db)
+    app.dependency_overrides[get_redis] = _override_redis(redis)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.patch("/api/users/me/password", json={
+                "old_password": "OldPass1",
+                "new_password": "NewPass1"
+            })
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_change_password_wrong_old_password_returns_400():
+    user = _make_user()
+    provider = _make_provider(user.id, ProviderType.email, provider_user_id="u@test.com")
+    provider.password_hash = "some_hash"
+
+    db = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = provider
+    db.execute = AsyncMock(return_value=result)
+    redis = AsyncMock()
+    redis.get = AsyncMock(return_value=b"0")
+
+    with patch("app.routers.users.verify_password", return_value=False):
+        app.dependency_overrides[get_current_user] = lambda: user
+        app.dependency_overrides[get_db] = _override_db(db)
+        app.dependency_overrides[get_redis] = _override_redis(redis)
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.patch("/api/users/me/password", json={
+                    "old_password": "WrongPass1",
+                    "new_password": "NewPass1"
+                })
+        finally:
+            app.dependency_overrides.clear()
+    assert resp.status_code == 400
+    assert "Неверный" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_change_password_success():
+    user = _make_user()
+    provider = _make_provider(user.id, ProviderType.email, provider_user_id="u@test.com")
+    provider.password_hash = "old_hash"
+
+    db = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = provider
+    db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
+    redis = AsyncMock()
+    redis.get = AsyncMock(return_value=b"0")
+    redis.incr = AsyncMock()
+
+    with (
+        patch("app.routers.users.verify_password", return_value=True),
+        patch("app.routers.users.hash_password", return_value="new_hash"),
+    ):
+        app.dependency_overrides[get_current_user] = lambda: user
+        app.dependency_overrides[get_db] = _override_db(db)
+        app.dependency_overrides[get_redis] = _override_redis(redis)
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.patch("/api/users/me/password", json={
+                    "old_password": "OldPass1",
+                    "new_password": "NewPass1"
+                })
+        finally:
+            app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert provider.password_hash == "new_hash"
+    redis.incr.assert_called_once()
+
+
+# --- update display name tests ---
+
+@pytest.mark.asyncio
+async def test_update_display_name_success():
+    user = _make_user(display_name="OldName")
+    db = AsyncMock()
+    db.commit = AsyncMock()
+    redis = AsyncMock()
+    redis.get = AsyncMock(return_value=b"0")
+
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_db] = _override_db(db)
+    app.dependency_overrides[get_redis] = _override_redis(redis)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.patch("/api/users/me", json={"display_name": "  NewName  "})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert user.display_name == "NewName"  # stripped
+
+
+@pytest.mark.asyncio
+async def test_update_display_name_empty_returns_422():
+    user = _make_user()
+    redis = AsyncMock()
+    redis.get = AsyncMock(return_value=b"0")
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_redis] = _override_redis(redis)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.patch("/api/users/me", json={"display_name": "   "})
+    finally:
+        app.dependency_overrides.clear()
     assert resp.status_code == 422
