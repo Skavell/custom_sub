@@ -21,5 +21,6 @@ def test_strong_password_accepted():
 
 
 def test_weak_password_rejected_in_link_email():
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc:
         LinkEmailRequest(email="a@b.com", password="weakpass")
+    assert "заглавную" in str(exc.value)
