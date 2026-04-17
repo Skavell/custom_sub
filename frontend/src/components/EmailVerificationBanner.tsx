@@ -46,7 +46,7 @@ export default function EmailVerificationBanner({ userEmail }: Props) {
   }
 
   return (
-    <div className="rounded-card border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+    <div className="mb-4 rounded-card border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
       <div className="flex items-start gap-2 flex-1 min-w-0">
         <AlertTriangle size={16} className="text-yellow-400 mt-0.5 shrink-0" />
         <div className="text-sm text-text-secondary min-w-0">
