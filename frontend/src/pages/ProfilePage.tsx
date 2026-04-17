@@ -70,6 +70,67 @@ function startVKLink(clientId: string) {
   window.location.href = url.toString()
 }
 
+function TelegramLinkButton({
+  botUsername,
+  onAuth,
+}: {
+  botUsername: string
+  onAuth: (user: Record<string, unknown>) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!ref.current || !botUsername) return
+    ;(window as unknown as Record<string, unknown>).__onTelegramLink = onAuth
+
+    const script = document.createElement('script')
+    script.src = 'https://telegram.org/js/telegram-widget.js?22'
+    script.setAttribute('data-telegram-login', botUsername)
+    script.setAttribute('data-size', 'large')
+    script.setAttribute('data-onauth', '__onTelegramLink(user)')
+    script.setAttribute('data-request-access', 'write')
+    script.async = true
+    ref.current.appendChild(script)
+
+    const observer = new MutationObserver(() => {
+      const iframe = ref.current?.querySelector('iframe')
+      if (!iframe) return
+      observer.disconnect()
+      const applyScale = () => {
+        const containerWidth = ref.current?.offsetWidth
+        const iframeWidth = iframe.offsetWidth
+        if (!containerWidth || !iframeWidth) { requestAnimationFrame(applyScale); return }
+        iframe.style.opacity = '0'
+        iframe.style.position = 'absolute'
+        iframe.style.top = '0'
+        iframe.style.left = '0'
+        iframe.style.transformOrigin = 'left top'
+        iframe.style.transform = `scaleX(${containerWidth / iframeWidth})`
+        iframe.style.cursor = 'pointer'
+      }
+      applyScale()
+    })
+    observer.observe(ref.current, { childList: true, subtree: true })
+
+    return () => {
+      observer.disconnect()
+      delete (window as unknown as Record<string, unknown>).__onTelegramLink
+    }
+  }, [botUsername, onAuth])
+
+  return (
+    <div className="group relative h-[42px]">
+      <div className="absolute inset-0 flex items-center gap-2.5 rounded-input bg-white/5 px-3 text-sm text-text-secondary group-hover:text-text-primary pointer-events-none select-none transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+          <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0M8.287 5.906q-1.168.486-4.666 2.01-.567.225-.595.442c-.03.243.275.339.69.47l.175.055c.408.133.958.288 1.243.294q.39.01.868-.32 3.269-2.206 3.374-2.23c.05-.012.12-.026.166.016s.042.12.037.141c-.03.129-1.227 1.241-1.846 1.817-.193.18-.33.307-.358.336a8 8 0 0 1-.188.186c-.38.366-.664.64.015 1.088.327.216.589.393.85.571.284.194.568.387.936.629q.14.092.27.187c.331.236.63.448.997.414.214-.02.435-.22.547-.82.265-1.417.786-4.486.906-5.751a1.4 1.4 0 0 0-.013-.315.34.34 0 0 0-.114-.217.53.53 0 0 0-.31-.093c-.3.005-.763.166-2.984 1.09" fill="#2AABEE"/>
+        </svg>
+        Telegram
+      </div>
+      <div ref={ref} className="absolute inset-0 overflow-hidden" />
+    </div>
+  )
+}
+
 export default function ProfilePage() {
   const queryClient = useQueryClient()
   const { user, isLoading: authLoading } = useAuth()
@@ -94,6 +155,7 @@ export default function ProfilePage() {
   const [linkPassword, setLinkPassword] = useState('')
   const [linkEmailError, setLinkEmailError] = useState<string | null>(null)
   const [linkTelegramError, setLinkTelegramError] = useState<string | null>(null)
+  const [linkTelegramNotification, setLinkTelegramNotification] = useState<string | null>(null)
 
   const linkEmailMutation = useMutation({
     mutationFn: ({ email, password }: { email: string; password: string }) =>
@@ -108,8 +170,6 @@ export default function ProfilePage() {
     onError: (e) => setLinkEmailError(e instanceof ApiError ? e.detail : 'Ошибка'),
   })
 
-  const telegramLinkRef = useRef<HTMLDivElement>(null)
-
   const linkedTypes = new Set(user?.providers.map((p) => p.type) ?? [])
 
   const canAddGoogle = oauthConfig?.google && !!oauthConfig.google_client_id && !linkedTypes.has('google')
@@ -117,28 +177,6 @@ export default function ProfilePage() {
   const canAddTelegram = oauthConfig?.telegram && !!oauthConfig.telegram_bot_username && !linkedTypes.has('telegram')
   const canAddEmail = (oauthConfig?.email_enabled !== false) && !linkedTypes.has('email')
   const hasAddable = canAddGoogle || canAddVK || canAddTelegram || canAddEmail
-
-  useEffect(() => {
-    if (!canAddTelegram || !oauthConfig?.telegram_bot_username || !telegramLinkRef.current) return
-    ;(window as unknown as Record<string, unknown>).__onTelegramLink = async (tgUser: Record<string, unknown>) => {
-      try {
-        await api.post('/api/users/me/providers/telegram', tgUser)
-        queryClient.invalidateQueries({ queryKey: ['me'] })
-        setLinkTelegramError(null)
-      } catch (e) {
-        setLinkTelegramError(e instanceof ApiError ? e.detail : 'Ошибка Telegram')
-      }
-    }
-    const script = document.createElement('script')
-    script.src = 'https://telegram.org/js/telegram-widget.js?22'
-    script.setAttribute('data-telegram-login', oauthConfig.telegram_bot_username)
-    script.setAttribute('data-size', 'medium')
-    script.setAttribute('data-onauth', '__onTelegramLink(user)')
-    script.setAttribute('data-request-access', 'write')
-    script.async = true
-    telegramLinkRef.current.appendChild(script)
-    return () => { delete (window as unknown as Record<string, unknown>).__onTelegramLink }
-  }, [canAddTelegram, oauthConfig?.telegram_bot_username])
 
   if (authLoading) {
     return (
@@ -256,10 +294,31 @@ export default function ProfilePage() {
                 ВКонтакте
               </button>
             )}
-            {canAddTelegram && (
+            {canAddTelegram && oauthConfig?.telegram_bot_username && (
               <div>
-                <div ref={telegramLinkRef} />
+                <TelegramLinkButton
+                  botUsername={oauthConfig.telegram_bot_username}
+                  onAuth={async (tgUser) => {
+                    try {
+                      const res = await api.post<{ ok: boolean; notification?: string | null }>(
+                        '/api/users/me/providers/telegram',
+                        tgUser,
+                      )
+                      queryClient.invalidateQueries({ queryKey: ['me'] })
+                      setLinkTelegramError(null)
+                      setLinkTelegramNotification(res.notification ?? null)
+                    } catch (e) {
+                      setLinkTelegramError(e instanceof ApiError ? e.detail : 'Ошибка Telegram')
+                    }
+                  }}
+                />
                 {linkTelegramError && <p className="mt-1 text-xs text-red-400">{linkTelegramError}</p>}
+                {linkTelegramNotification && (
+                  <div className="mt-2 flex items-start gap-2 rounded-input bg-amber-500/10 border border-amber-500/20 px-3 py-2">
+                    <AlertCircle size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-200 leading-relaxed">{linkTelegramNotification}</p>
+                  </div>
+                )}
               </div>
             )}
             {canAddEmail && !showEmailForm && (
