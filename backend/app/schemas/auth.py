@@ -1,6 +1,18 @@
 from pydantic import BaseModel, EmailStr, field_validator
 
 
+def validate_password_strength(v: str) -> str:
+    if len(v) < 8:
+        raise ValueError("Пароль должен содержать не менее 8 символов")
+    if not any(c.isupper() for c in v):
+        raise ValueError("Пароль должен содержать хотя бы одну заглавную букву")
+    if not any(c.islower() for c in v):
+        raise ValueError("Пароль должен содержать хотя бы одну строчную букву")
+    if not any(c.isdigit() for c in v):
+        raise ValueError("Пароль должен содержать хотя бы одну цифру")
+    return v
+
+
 class EmailRegisterRequest(BaseModel):
     email: EmailStr
     password: str
@@ -18,9 +30,7 @@ class EmailRegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
+        return validate_password_strength(v)
 
 
 class EmailLoginRequest(BaseModel):
@@ -74,6 +84,4 @@ class LinkEmailRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
+        return validate_password_strength(v)
