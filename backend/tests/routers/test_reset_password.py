@@ -89,6 +89,10 @@ async def test_reset_request_found_sends_email_and_returns_200():
 
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
+    redis.setex.assert_called_once()
+    call_args = redis.setex.call_args[0]
+    assert call_args[0].startswith("reset_pwd:")
+    assert call_args[1] == 3600
 
 
 @pytest.mark.asyncio
@@ -153,4 +157,4 @@ async def test_reset_confirm_valid_token_updates_password():
     assert resp.status_code == 200
     assert provider.password_hash == "new_hash"
     redis.incr.assert_called_once()
-    redis.delete.assert_called_once()
+    redis.delete.assert_called_once_with("reset_pwd:validtoken123")

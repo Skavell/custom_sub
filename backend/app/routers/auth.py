@@ -436,15 +436,16 @@ async def reset_password_request(
     if provider is None:
         raise HTTPException(status_code=404, detail="Email не найден")
 
-    token = secrets.token_urlsafe(32)
-    await redis.setex(f"reset_pwd:{token}", 3600, str(provider.user_id))
-
     api_key = await get_setting_decrypted(db, "resend_api_key")
     if not api_key:
         raise HTTPException(status_code=503, detail="Email-сервис не настроен")
     from_address = await get_setting(db, "email_from_address") or "noreply@example.com"
     from_name = await get_setting(db, "email_from_name") or "VPN Service"
-    site_url = settings.site_url.rstrip("/")
+
+    token = secrets.token_urlsafe(32)
+    await redis.setex(f"reset_pwd:{token}", 3600, str(provider.user_id))
+
+    site_url = settings.frontend_url.rstrip("/")
     reset_url = f"{site_url}/reset-password?token={token}"
 
     try:
