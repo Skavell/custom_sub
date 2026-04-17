@@ -173,7 +173,7 @@ export default function SubscriptionPage() {
     mutationFn: (req: CreatePaymentRequest) =>
       api.post<PaymentResponse>('/api/payments', req),
     onSuccess: (data) => {
-      window.location.href = data.payment_url
+      window.open(data.payment_url, '_blank', 'noopener,noreferrer')
     },
   })
 
@@ -190,6 +190,21 @@ export default function SubscriptionPage() {
       promo_code: validatedPromo?.code ?? null,
       provider: selectedProvider,
     })
+  }
+
+  function handleTransferPay() {
+    if (!selectedPlan || !oauthConfig?.support_telegram_url) return
+    const lines = [
+      `Привет! Хочу оплатить подписку на ${selectedPlan.label} переводом`,
+      '',
+      'техническая информация:',
+      `my id: \`${user?.id ?? '—'}\``,
+      ...(validatedPromo ? [`promo: \`${validatedPromo.code}\``] : []),
+      `sub_exp: \`${projectedExpiry ? formatDate(projectedExpiry) : '—'}\``,
+    ]
+    const text = encodeURIComponent(lines.join('\n'))
+    const base = oauthConfig.support_telegram_url.replace(/\/$/, '')
+    window.open(`${base}?text=${text}`, '_blank', 'noopener,noreferrer')
   }
 
   if (plansLoading) {
@@ -359,6 +374,16 @@ export default function SubscriptionPage() {
               activeProviders.length === 0 ? 'Оплата недоступна' : `Оплатить через ${activeProviders.find(p => p.name === selectedProvider)?.label ?? selectedProvider ?? '...'}`
             )}
           </button>
+          {oauthConfig?.support_telegram_url && (
+            <button
+              onClick={handleTransferPay}
+              disabled={showVerifyBanner}
+              title={showVerifyBanner ? 'Сначала подтвердите email' : undefined}
+              className="mt-2 w-full rounded-input bg-white/5 hover:bg-white/10 disabled:opacity-50 text-text-secondary font-medium py-2.5 text-sm transition-colors"
+            >
+              Оплатить переводом
+            </button>
+          )}
         </div>
       )}
 

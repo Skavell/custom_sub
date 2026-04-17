@@ -246,7 +246,7 @@ export default function StatusWidget() {
   })
 
   const groups: MonitorGroup[] =
-    nodes && heartbeat ? mergeData(nodes, heartbeat) : []
+    nodes?.publicGroupList && heartbeat ? mergeData(nodes, heartbeat) : []
 
   const totalCount = groups.reduce((s, g) => s + g.monitors.length, 0)
   const upCount = groups.reduce(
