@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, ApiError } from '@/lib/api'
@@ -30,66 +30,6 @@ function loginWithVK(clientId: string) {
   window.location.href = url.toString()
 }
 
-function TelegramLoginButton({
-  botUsername,
-  onAuth,
-}: {
-  botUsername: string
-  onAuth: (user: Record<string, unknown>) => void
-}) {
-  const widgetRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!widgetRef.current || !botUsername) return
-    ;(window as unknown as Record<string, unknown>).__onTelegramAuth = onAuth
-
-    const script = document.createElement('script')
-    script.src = 'https://telegram.org/js/telegram-widget.js?22'
-    script.setAttribute('data-telegram-login', botUsername)
-    script.setAttribute('data-size', 'large')
-    script.setAttribute('data-onauth', '__onTelegramAuth(user)')
-    script.setAttribute('data-request-access', 'write')
-    script.async = true
-    widgetRef.current.appendChild(script)
-
-    const observer = new MutationObserver(() => {
-      const iframe = widgetRef.current?.querySelector('iframe')
-      if (!iframe) return
-      observer.disconnect()
-      const applyScale = () => {
-        const containerWidth = widgetRef.current?.offsetWidth
-        const iframeWidth = iframe.offsetWidth
-        if (!containerWidth || !iframeWidth) { requestAnimationFrame(applyScale); return }
-        iframe.style.opacity = '0'
-        iframe.style.position = 'absolute'
-        iframe.style.top = '0'
-        iframe.style.left = '0'
-        iframe.style.transformOrigin = 'left top'
-        iframe.style.transform = `scaleX(${containerWidth / iframeWidth})`
-        iframe.style.cursor = 'pointer'
-      }
-      applyScale()
-    })
-    observer.observe(widgetRef.current, { childList: true, subtree: true })
-
-    return () => {
-      observer.disconnect()
-      delete (window as unknown as Record<string, unknown>).__onTelegramAuth
-    }
-  }, [botUsername, onAuth])
-
-  return (
-    <div className="group relative h-[42px]">
-      <div className="absolute inset-0 flex items-center justify-center gap-2.5 rounded-input border border-border-neutral bg-background text-sm text-text-primary hover:border-border-accent pointer-events-none select-none transition-colors">
-        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16">
-          <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0M8.287 5.906q-1.168.486-4.666 2.01-.567.225-.595.442c-.03.243.275.339.69.47l.175.055c.408.133.958.288 1.243.294q.39.01.868-.32 3.269-2.206 3.374-2.23c.05-.012.12-.026.166.016s.042.12.037.141c-.03.129-1.227 1.241-1.846 1.817-.193.18-.33.307-.358.336a8 8 0 0 1-.188.186c-.38.366-.664.64.015 1.088.327.216.589.393.85.571.284.194.568.387.936.629q.14.092.27.187c.331.236.63.448.997.414.214-.02.435-.22.547-.82.265-1.417.786-4.486.906-5.751a1.4 1.4 0 0 0-.013-.315.34.34 0 0 0-.114-.217.53.53 0 0 0-.31-.093c-.3.005-.763.166-2.984 1.09" fill="#2AABEE"/>
-        </svg>
-        Войти через Telegram
-      </div>
-      <div ref={widgetRef} className="absolute inset-0 overflow-hidden" />
-    </div>
-  )
-}
 
 function isStrongPassword(p: string) {
   return p.length >= 8 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /[0-9]/.test(p)
@@ -115,21 +55,16 @@ export default function LoginPage() {
 
   const showGoogle = oauthConfig?.google && !!oauthConfig.google_client_id
   const showVK = oauthConfig?.vk && !!oauthConfig.vk_client_id
-  const showTelegram = oauthConfig?.telegram && !!oauthConfig.telegram_bot_username
-  const hasOAuth = showGoogle || showVK || showTelegram
+  const showTelegramOIDC = oauthConfig?.telegram_oidc && !!oauthConfig.telegram_oidc_client_id
+  const hasOAuth = showGoogle || showVK || showTelegramOIDC
 
-  const handleTelegramAuth = useCallback(async (user: Record<string, unknown>) => {
-    setError(null)
-    setLoading(true)
-    try {
-      await api.post('/api/auth/oauth/telegram', user)
-      navigate('/', { replace: true })
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : 'Ошибка входа через Telegram')
-    } finally {
-      setLoading(false)
-    }
-  }, [navigate])
+  const handleTelegramOIDCLogin = () => {
+    if (!oauthConfig?.telegram_oidc_client_id) return;
+    const redirectUri = encodeURIComponent(`${window.location.origin}/auth/telegram/callback`);
+    const origin = encodeURIComponent(window.location.origin);
+    const clientId = oauthConfig.telegram_oidc_client_id;
+    window.location.href = `https://oauth.telegram.org/auth?bot_id=${clientId}&origin=${origin}&response_type=code&redirect_uri=${redirectUri}&lang=en`;
+  };
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -204,11 +139,17 @@ export default function LoginPage() {
                 Войти через ВКонтакте
               </button>
             )}
-            {showTelegram && oauthConfig?.telegram_bot_username && (
-              <TelegramLoginButton
-                botUsername={oauthConfig.telegram_bot_username}
-                onAuth={handleTelegramAuth}
-              />
+            {showTelegramOIDC && (
+              <button
+                type="button"
+                onClick={handleTelegramOIDCLogin}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-input border border-border-neutral bg-surface hover:bg-[#0d1a2a] text-text-primary text-sm transition-colors"
+              >
+                <svg className="w-5 h-5 text-[#2AABEE]" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.32 13.617l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.828.942z"/>
+                </svg>
+                Войти через Telegram
+              </button>
             )}
           </div>
         )}
