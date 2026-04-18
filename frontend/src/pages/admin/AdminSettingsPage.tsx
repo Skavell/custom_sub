@@ -12,6 +12,10 @@ const OAUTH_KEYS = new Set([
   'vk_enabled', 'vk_client_id', 'vk_client_secret',
   'email_enabled',
   'telegram_enabled', 'telegram_bot_token', 'telegram_bot_username',
+  'telegram_oidc_enabled', 'telegram_oidc_client_id', 'telegram_oidc_client_secret',
+])
+
+const SUPPORT_KEYS = new Set([
   'support_telegram_link', 'telegram_support_chat_id',
 ])
 
@@ -668,6 +672,7 @@ export default function AdminSettingsPage() {
             !REGISTRATION_KEYS.has(s.key) &&
             !PAYMENT_KEYS.has(s.key) &&
             !OAUTH_KEYS.has(s.key) &&
+            !SUPPORT_KEYS.has(s.key) &&
             !s.key.startsWith(INSTALL_KEY_PREFIX),
         )
 
@@ -784,6 +789,23 @@ export default function AdminSettingsPage() {
               <CryptoBotBlock settings={allSettings} />
             </CollapsibleSection>
 
+            {/* Поддержка и уведомления */}
+            <CollapsibleSection title="Поддержка и уведомления">
+              <OAuthField
+                label="Ссылка поддержки (Telegram)"
+                settingKey="support_telegram_link"
+                placeholder="https://t.me/your_support"
+                settings={allSettings}
+              />
+              <OAuthField
+                label="Chat ID поддержки (для уведомлений бота)"
+                settingKey="telegram_support_chat_id"
+                placeholder="-100123456789"
+                hint="Сообщения из формы поддержки отправляются боту в этот чат"
+                settings={allSettings}
+              />
+            </CollapsibleSection>
+
             {/* OAuth провайдеры */}
             <CollapsibleSection title="OAuth провайдеры">
               <div className="flex flex-col gap-2">
@@ -806,14 +828,21 @@ export default function AdminSettingsPage() {
                   ]}
                 />
                 <OAuthProviderBlock
-                  title="Telegram"
+                  title="Telegram (виджет, устаревший)"
                   enableKey="telegram_enabled"
                   settings={allSettings}
                   fields={[
                     { label: 'Bot Token', key: 'telegram_bot_token', sensitive: true, placeholder: '123456:ABC…' },
                     { label: 'Bot Username (без @)', key: 'telegram_bot_username', placeholder: 'mybot' },
-                    { label: 'Chat ID поддержки', key: 'telegram_support_chat_id', placeholder: '-100123456789' },
-                    { label: 'Ссылка поддержки', key: 'support_telegram_link', placeholder: 'https://t.me/…' },
+                  ]}
+                />
+                <OAuthProviderBlock
+                  title="Telegram (новый OIDC-вход)"
+                  enableKey="telegram_oidc_enabled"
+                  settings={allSettings}
+                  fields={[
+                    { label: 'Bot ID (client_id)', key: 'telegram_oidc_client_id', placeholder: '123456789' },
+                    { label: 'Client Secret', key: 'telegram_oidc_client_secret', sensitive: true },
                   ]}
                 />
                 <div className={cn(
