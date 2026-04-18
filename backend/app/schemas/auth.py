@@ -67,6 +67,11 @@ class VKOAuthRequest(BaseModel):
     state: str
 
 
+class TelegramOIDCOAuthRequest(BaseModel):
+    code: str
+    redirect_uri: str
+
+
 class OAuthConfigResponse(BaseModel):
     google: bool
     google_client_id: str | None
@@ -74,6 +79,8 @@ class OAuthConfigResponse(BaseModel):
     vk_client_id: str | None
     telegram: bool
     telegram_bot_username: str | None
+    telegram_oidc: bool
+    telegram_oidc_client_id: str | None
     email_enabled: bool
     support_telegram_url: str | None
     email_verification_required: bool = False
