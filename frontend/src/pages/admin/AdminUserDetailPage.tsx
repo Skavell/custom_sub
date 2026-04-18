@@ -90,10 +90,15 @@ export default function AdminUserDetailPage() {
   const [uuidInput, setUuidInput] = useState('')
   const [confirm, setConfirm] = useState<{ message: string; action: () => void } | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
+  const [errMsg, setErrMsg] = useState<string | null>(null)
 
   const flash = (text: string) => {
     setMsg(text)
     setTimeout(() => setMsg(null), 3000)
+  }
+  const flashErr = (text: string) => {
+    setErrMsg(text)
+    setTimeout(() => setErrMsg(null), 4000)
   }
 
   const { data: user, isLoading, error } = useQuery<UserAdminDetail>({
@@ -104,7 +109,7 @@ export default function AdminUserDetailPage() {
 
   useEffect(() => {
     if (user) setUuidInput(user.remnawave_uuid ?? '')
-  }, [user?.remnawave_uuid])
+  }, [user])
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin-user', id] })
 
@@ -144,8 +149,8 @@ export default function AdminUserDetailPage() {
       invalidate()
       flash('UUID обновлён и синхронизирован')
     },
-    onError: (err: unknown) => {
-      flash(err instanceof ApiError ? err.detail : 'Ошибка')
+    onError: (err) => {
+      flashErr(err instanceof ApiError ? err.detail : 'Ошибка')
     },
   })
 
@@ -204,6 +209,12 @@ export default function AdminUserDetailPage() {
         <div className="flex items-center gap-2 text-xs text-green-400 bg-green-500/10 rounded-input px-3 py-2">
           <CheckCircle size={13} />
           {msg}
+        </div>
+      )}
+      {errMsg && (
+        <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 rounded-input px-3 py-2">
+          <XCircle size={13} />
+          {errMsg}
         </div>
       )}
 
@@ -353,7 +364,7 @@ export default function AdminUserDetailPage() {
               className="flex-1 rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
             />
             <button
-              onClick={() => setUuidMutation.mutate({ remnawave_uuid: uuidInput })}
+              onClick={() => setUuidMutation.mutate({ remnawave_uuid: uuidInput.trim() })}
               disabled={!uuidInput.trim() || setUuidMutation.isPending}
               className="px-3 py-1.5 rounded-input bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 transition-colors disabled:opacity-50 whitespace-nowrap"
             >
