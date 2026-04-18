@@ -31,6 +31,7 @@ from app.schemas.admin import (
     ArticleCreateRequest,
     ArticleUpdateRequest,
     ConflictResolveRequest,
+    SetRemnawaveUuidRequest,
     PlanAdminItem,
     PlanCreateRequest,
     PlanUpdateRequest,
@@ -290,6 +291,49 @@ async def resolve_conflict(
             await sync_subscription_from_remnawave(db, user, rw_user)
         except Exception:
             pass  # Conflict cleared; sync failure is non-critical
+
+    return {"ok": True}
+
+
+@router.patch("/users/{user_id}/remnawave-uuid")
+async def set_remnawave_uuid(
+    user_id: uuid.UUID,
+    data: SetRemnawaveUuidRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    try:
+        new_rw_uuid = uuid.UUID(data.remnawave_uuid)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный UUID")
+
+    # Check no other user already holds this remnawave_uuid
+    conflict_result = await db.execute(
+        select(User).where(User.remnawave_uuid == new_rw_uuid, User.id != user_id)
+    )
+    if conflict_result.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Этот Remnawave UUID уже привязан к другому пользователю",
+        )
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+
+    user.remnawave_uuid = new_rw_uuid
+    user.subscription_conflict = False
+    await db.commit()
+
+    url = await get_setting(db, "remnawave_url")
+    token = await get_setting_decrypted(db, "remnawave_token")
+    if url and token:
+        try:
+            rw_user = await RemnawaveClient(url, token).get_user(str(new_rw_uuid))
+            await sync_subscription_from_remnawave(db, user, rw_user)
+        except Exception:
+            pass  # UUID saved; sync failure is non-critical
 
     return {"ok": True}
 
