@@ -226,8 +226,8 @@ async def reset_subscription(
     sub = sub_result.scalar_one_or_none()
     if sub is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Подписка не найдена")
-    sub.status = SubscriptionStatus.expired
-    sub.expires_at = datetime.now(tz=timezone.utc)
+    await db.delete(sub)
+    user.remnawave_uuid = None
     await db.commit()
     return {"ok": True}
 

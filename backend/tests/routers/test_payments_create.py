@@ -137,6 +137,7 @@ async def test_create_payment_duplicate_pending_returns_200():
     pending_tx.status = TransactionStatus.pending
     pending_tx.payment_url = "https://t.me/CryptoBot?start=IVexisting"
     pending_tx.id = uuid.uuid4()
+    pending_tx.plan_id = PLAN_ID
     pending_tx.amount_rub = 200
     pending_tx.created_at = NOW  # recent
 

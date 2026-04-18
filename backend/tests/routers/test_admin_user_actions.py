@@ -105,12 +105,11 @@ async def test_ban_self_returns_403():
 
 
 @pytest.mark.asyncio
-async def test_reset_subscription_marks_expired():
-    """POST /reset-subscription sets status=expired and expires_at=now."""
-    from datetime import datetime, timezone
-
+async def test_reset_subscription_deletes_sub_and_clears_uuid():
+    """POST /reset-subscription deletes the subscription and clears remnawave_uuid."""
     admin = _make_admin()
     target = _make_target_user()
+    target.remnawave_uuid = "some-uuid"
     sub = MagicMock(spec=Subscription)
     sub.status = SubscriptionStatus.active
 
@@ -128,6 +127,7 @@ async def test_reset_subscription_marks_expired():
         return sub_result
 
     db.execute = AsyncMock(side_effect=mock_execute)
+    db.delete = AsyncMock()
     db.commit = AsyncMock()
 
     app.dependency_overrides[require_admin] = lambda: admin
@@ -138,7 +138,7 @@ async def test_reset_subscription_marks_expired():
             resp = await client.post(f"/api/admin/users/{target.id}/reset-subscription")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
-        assert sub.status == SubscriptionStatus.expired
-        assert sub.expires_at is not None
+        db.delete.assert_called_once_with(sub)
+        assert target.remnawave_uuid is None
     finally:
         app.dependency_overrides.clear()
