@@ -313,6 +313,8 @@ export interface OAuthConfigResponse {
   vk_client_id: string | null
   telegram: boolean
   telegram_bot_username: string | null
+  telegram_oidc: boolean
+  telegram_oidc_client_id: string | null
   email_enabled: boolean
   support_telegram_url: string | null
   email_verification_required: boolean

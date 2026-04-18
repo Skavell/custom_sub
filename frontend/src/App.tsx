@@ -14,6 +14,7 @@ import ProfilePage from '@/pages/ProfilePage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import GoogleCallbackPage from '@/pages/GoogleCallbackPage'
 import VKCallbackPage from '@/pages/VKCallbackPage'
+import TelegramOIDCCallbackPage from '@/pages/TelegramOIDCCallbackPage'
 import AdminUsersPage from '@/pages/admin/AdminUsersPage'
 import AdminUserDetailPage from '@/pages/admin/AdminUserDetailPage'
 import AdminSyncPage from '@/pages/admin/AdminSyncPage'
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/auth/google/callback" element={<GoogleCallbackPage />} />
         <Route path="/auth/vk/callback" element={<VKCallbackPage />} />
+        <Route path="/auth/telegram/callback" element={<TelegramOIDCCallbackPage />} />
 
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
