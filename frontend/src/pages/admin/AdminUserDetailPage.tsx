@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
-import type { UserAdminDetail, ConflictResolveRequest } from '@/types/api'
+import type { UserAdminDetail, SetRemnawaveUuidRequest } from '@/types/api'
 
 // ─── Confirmation dialog ──────────────────────────────────────────────────────
 
@@ -87,7 +87,7 @@ export default function AdminUserDetailPage() {
   const queryClient = useQueryClient()
   const { user: currentAdmin } = useAuth()
 
-  const [resolveUuid, setResolveUuid] = useState('')
+  const [uuidInput, setUuidInput] = useState('')
   const [confirm, setConfirm] = useState<{ message: string; action: () => void } | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
 
@@ -101,6 +101,10 @@ export default function AdminUserDetailPage() {
     queryFn: () => api.get<UserAdminDetail>(`/api/admin/users/${id}`),
     enabled: !!id,
   })
+
+  useEffect(() => {
+    if (user) setUuidInput(user.remnawave_uuid ?? '')
+  }, [user?.remnawave_uuid])
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin-user', id] })
 
@@ -133,14 +137,15 @@ export default function AdminUserDetailPage() {
     onSuccess: () => { invalidate(); flash('Синхронизация выполнена') },
   })
 
-  const resolveMutation = useMutation({
-    mutationFn: (data: ConflictResolveRequest) =>
-      api.post(`/api/admin/users/${id}/resolve-conflict`, data),
+  const setUuidMutation = useMutation({
+    mutationFn: (data: SetRemnawaveUuidRequest) =>
+      api.patch(`/api/admin/users/${id}/remnawave-uuid`, data),
     onSuccess: () => {
       invalidate()
-      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
-      setResolveUuid('')
-      flash('Конфликт разрешён')
+      flash('UUID обновлён и синхронизирован')
+    },
+    onError: (err: unknown) => {
+      flash(err instanceof ApiError ? err.detail : 'Ошибка')
     },
   })
 
@@ -331,30 +336,31 @@ export default function AdminUserDetailPage() {
           />
         </div>
 
-        {/* Resolve conflict */}
-        {user.subscription_conflict && (
-          <div className="space-y-2">
+        {/* Remnawave UUID */}
+        <div className="space-y-2 pt-2 border-t border-border-neutral/50">
+          <p className="text-xs text-text-muted">Remnawave UUID</p>
+          {user.subscription_conflict && (
             <div className="flex items-center gap-2 text-xs text-yellow-400">
               <AlertTriangle size={13} />
-              Конфликт UUID — введите правильный Remnawave UUID:
+              Конфликт UUID — укажите правильный UUID:
             </div>
-            <div className="flex gap-2">
-              <input
-                value={resolveUuid}
-                onChange={(e) => setResolveUuid(e.target.value)}
-                placeholder="UUID из Remnawave"
-                className="flex-1 rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
-              />
-              <button
-                onClick={() => resolveMutation.mutate({ remnawave_uuid: resolveUuid })}
-                disabled={!resolveUuid.trim() || resolveMutation.isPending}
-                className="px-3 py-1.5 rounded-input bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 transition-colors disabled:opacity-50"
-              >
-                Применить
-              </button>
-            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              value={uuidInput}
+              onChange={(e) => setUuidInput(e.target.value)}
+              placeholder="UUID из Remnawave"
+              className="flex-1 rounded-input bg-background border border-border-neutral px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
+            />
+            <button
+              onClick={() => setUuidMutation.mutate({ remnawave_uuid: uuidInput })}
+              disabled={!uuidInput.trim() || setUuidMutation.isPending}
+              className="px-3 py-1.5 rounded-input bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+            >
+              {setUuidMutation.isPending ? 'Применение...' : 'Применить и синхронизировать'}
+            </button>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Recent transactions */}
