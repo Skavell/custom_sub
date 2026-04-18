@@ -59,6 +59,13 @@ function startGoogleLink(clientId: string) {
   window.location.href = url.toString()
 }
 
+function startTelegramOIDCLink(clientId: string) {
+  localStorage.setItem('telegram_oidc_intent', 'link')
+  const redirectUri = encodeURIComponent(`${window.location.origin}/auth/telegram/callback`)
+  const origin = encodeURIComponent(window.location.origin)
+  window.location.href = `https://oauth.telegram.org/auth?bot_id=${clientId}&origin=${origin}&response_type=code&redirect_uri=${redirectUri}&lang=en`
+}
+
 function startVKLink(clientId: string) {
   const deviceId = crypto.randomUUID()
   const state = crypto.randomUUID()
@@ -223,8 +230,9 @@ export default function ProfilePage() {
   const canAddGoogle = oauthConfig?.google && !!oauthConfig.google_client_id && !linkedTypes.has('google')
   const canAddVK = oauthConfig?.vk && !!oauthConfig.vk_client_id && !linkedTypes.has('vk')
   const canAddTelegram = oauthConfig?.telegram && !!oauthConfig.telegram_bot_username && !linkedTypes.has('telegram')
+  const canAddTelegramOIDC = oauthConfig?.telegram_oidc && !!oauthConfig.telegram_oidc_client_id && !linkedTypes.has('telegram')
   const canAddEmail = (oauthConfig?.email_enabled !== false) && !linkedTypes.has('email')
-  const hasAddable = canAddGoogle || canAddVK || canAddTelegram || canAddEmail
+  const hasAddable = canAddGoogle || canAddVK || canAddTelegram || canAddTelegramOIDC || canAddEmail
 
   if (authLoading) {
     return (
@@ -495,6 +503,14 @@ export default function ProfilePage() {
                   </div>
                 )}
               </div>
+            )}
+            {canAddTelegramOIDC && oauthConfig?.telegram_oidc_client_id && (
+              <button
+                onClick={() => startTelegramOIDCLink(oauthConfig.telegram_oidc_client_id!)}
+                className="flex items-center gap-2.5 rounded-input bg-white/5 px-3 py-2.5 text-sm text-text-secondary hover:text-text-primary transition-colors text-left"
+              >
+                Telegram
+              </button>
             )}
             {canAddEmail && !showEmailForm && (
               <button

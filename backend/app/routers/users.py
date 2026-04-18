@@ -9,10 +9,11 @@ from app.redis_client import get_redis
 from app.models.user import User
 from app.models.auth_provider import AuthProvider, ProviderType
 from app.schemas.user import UserProfileResponse, ProviderInfo, ChangePasswordRequest, UpdateDisplayNameRequest
-from app.schemas.auth import GoogleOAuthRequest, VKOAuthRequest, TelegramOAuthRequest, LinkEmailRequest
+from app.schemas.auth import GoogleOAuthRequest, VKOAuthRequest, TelegramOAuthRequest, TelegramOIDCOAuthRequest, LinkEmailRequest
 from app.services.auth.oauth.google import exchange_google_code
 from app.services.auth.oauth.vk import exchange_vk_code
 from app.services.auth.oauth.telegram import verify_telegram_data, parse_telegram_user
+from app.services.auth.oauth.telegram_oidc import exchange_telegram_oidc_code
 from app.services.auth.password_service import hash_password, verify_password
 from app.services.setting_service import get_setting, get_setting_decrypted
 from app.config import settings as app_settings
@@ -194,6 +195,35 @@ async def link_telegram(
     await db.commit()
 
     # Sync / merge subscription from Remnawave
+    from app.services.subscription_service import sync_remnawave_by_telegram_id
+    result = await sync_remnawave_by_telegram_id(db, current_user, tg_user.id, tg_user.username)
+
+    return {"ok": True, "notification": result.notification}
+
+
+@router.post("/me/providers/telegram-oidc", status_code=200)
+async def link_telegram_oidc(
+    data: TelegramOIDCOAuthRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    client_id = await get_setting(db, "telegram_oidc_client_id")
+    client_secret = await get_setting_decrypted(db, "telegram_oidc_client_secret")
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=503, detail="Telegram OIDC not configured")
+    try:
+        tg_user = await exchange_telegram_oidc_code(data.code, data.redirect_uri, client_id, client_secret)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Telegram OIDC failed")
+    await _check_provider_not_taken(db, ProviderType.telegram, str(tg_user.id))
+    db.add(AuthProvider(
+        user_id=current_user.id,
+        provider=ProviderType.telegram,
+        provider_user_id=str(tg_user.id),
+        provider_username=tg_user.username,
+    ))
+    await db.commit()
+
     from app.services.subscription_service import sync_remnawave_by_telegram_id
     result = await sync_remnawave_by_telegram_id(db, current_user, tg_user.id, tg_user.username)
 

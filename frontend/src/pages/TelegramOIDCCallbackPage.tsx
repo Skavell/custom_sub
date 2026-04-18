@@ -20,14 +20,22 @@ export default function TelegramOIDCCallbackPage() {
     }
 
     const redirectUri = `${window.location.origin}/auth/telegram/callback`;
+    const intent = localStorage.getItem("telegram_oidc_intent");
+    localStorage.removeItem("telegram_oidc_intent");
 
     const doAuth = async () => {
       try {
-        await api.post("/api/auth/oauth/telegram-oidc", { code, redirect_uri: redirectUri });
-        navigate("/", { replace: true });
+        if (intent === "link") {
+          await api.post("/api/users/me/providers/telegram-oidc", { code, redirect_uri: redirectUri });
+          navigate("/profile?linked=telegram", { replace: true });
+        } else {
+          await api.post("/api/auth/oauth/telegram-oidc", { code, redirect_uri: redirectUri });
+          navigate("/", { replace: true });
+        }
       } catch (e) {
         console.error("Telegram OIDC failed", e);
-        navigate("/login?error=telegram_oidc_failed", { replace: true });
+        const dest = intent === "link" ? "/profile?error=link_failed" : "/login?error=telegram_oidc_failed";
+        navigate(dest, { replace: true });
       }
     };
 
