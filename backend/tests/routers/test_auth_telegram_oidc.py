@@ -108,7 +108,7 @@ async def test_telegram_oidc_creates_new_user():
 @pytest.mark.asyncio
 async def test_oauth_config_includes_telegram_oidc_fields():
     """GET /api/auth/oauth-config returns telegram_oidc=True and telegram_oidc_client_id when enabled."""
-    async def mock_get(db, key):
+    def mock_get(db, key):
         mapping = {
             "telegram_oidc_enabled": "true",
             "telegram_oidc_client_id": "12345678",
