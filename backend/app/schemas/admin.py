@@ -77,6 +77,10 @@ class ConflictResolveRequest(BaseModel):
     remnawave_uuid: str  # UUID string of the Remnawave user to keep
 
 
+class SetRemnawaveUuidRequest(BaseModel):
+    remnawave_uuid: str  # UUID string of the Remnawave user to assign
+
+
 class SyncStatusResponse(BaseModel):
     status: str   # "running" | "completed" | "failed" | "timed_out"
     total: int
