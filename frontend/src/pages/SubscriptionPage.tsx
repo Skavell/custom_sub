@@ -120,6 +120,7 @@ export default function SubscriptionPage() {
   const [validatedPromo, setValidatedPromo] = useState<ValidatePromoResponse | null>(null)
   const [promoError, setPromoError] = useState<string | null>(null)
   const [promoValidating, setPromoValidating] = useState(false)
+  const [transferError, setTransferError] = useState<string | null>(null)
 
   const selectedPlan = plans.find((p) => p.id === selectedPlanId) ?? null
   const isNewUser = user?.has_made_payment === false
@@ -193,7 +194,12 @@ export default function SubscriptionPage() {
   }
 
   function handleTransferPay() {
+    if (sub === null) {
+      setTransferError('Сначала активируйте пробный период')
+      return
+    }
     if (!selectedPlan || !oauthConfig?.support_telegram_url) return
+    setTransferError(null)
     const lines = [
       `Привет! Хочу оплатить подписку на ${selectedPlan.label} переводом`,
       '',
@@ -375,14 +381,19 @@ export default function SubscriptionPage() {
             )}
           </button>
           {oauthConfig?.support_telegram_url && (
-            <button
-              onClick={handleTransferPay}
-              disabled={showVerifyBanner}
-              title={showVerifyBanner ? 'Сначала подтвердите email' : undefined}
-              className="mt-2 w-full rounded-input bg-white/5 hover:bg-white/10 disabled:opacity-50 text-text-secondary font-medium py-2.5 text-sm transition-colors"
-            >
-              Оплатить переводом
-            </button>
+            <>
+              {transferError && (
+                <p className="mt-2 text-xs text-red-400">{transferError}</p>
+              )}
+              <button
+                onClick={handleTransferPay}
+                disabled={showVerifyBanner}
+                title={showVerifyBanner ? 'Сначала подтвердите email' : undefined}
+                className="mt-2 w-full rounded-input bg-white/5 hover:bg-white/10 disabled:opacity-50 text-text-secondary font-medium py-2.5 text-sm transition-colors"
+              >
+                Оплатить переводом
+              </button>
+            </>
           )}
         </div>
       )}
