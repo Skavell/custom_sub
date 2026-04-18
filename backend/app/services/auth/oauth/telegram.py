@@ -11,6 +11,7 @@ class TelegramUser:
     last_name: str | None
     username: str | None
     photo_url: str | None
+    phone_number: str | None = None
 
 
 def verify_telegram_data(data: dict, bot_token: str, max_age_seconds: int = 86400) -> dict:

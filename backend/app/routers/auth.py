@@ -293,6 +293,7 @@ async def oauth_telegram_oidc(
             provider_user_id=str(tg_user.id),
             avatar_url=tg_user.photo_url,
             provider_username=tg_user.username,
+            phone_number=tg_user.phone_number,
         )
         await _sync_remnawave_on_first_telegram_login(db, user, tg_user.id, tg_user.username)
 

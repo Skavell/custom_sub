@@ -46,9 +46,9 @@ async def exchange_telegram_oidc_code(
 
     claims = _decode_jwt_payload(id_token)
 
-    user_id = claims.get("sub")
+    user_id = claims.get("id") or claims.get("sub")
     if not user_id:
-        raise ValueError("Invalid Telegram OIDC token: missing sub claim")
+        raise ValueError("Invalid Telegram OIDC token: missing id/sub claim")
 
     # Split full name into first/last; fall back to given_name/family_name if present
     first_name = claims.get("given_name") or claims.get("name", "").split(" ", 1)[0]
@@ -64,4 +64,5 @@ async def exchange_telegram_oidc_code(
         last_name=last_name,
         username=claims.get("preferred_username") or claims.get("username"),
         photo_url=claims.get("picture"),
+        phone_number=claims.get("phone_number"),
     )

@@ -9,6 +9,7 @@ class ProviderInfo(BaseModel):
     provider: str
     provider_user_id: str
     provider_username: str | None
+    phone_number: str | None = None
     email_verified: bool | None = None
     created_at: datetime
     model_config = {"from_attributes": True}

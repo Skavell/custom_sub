@@ -27,6 +27,7 @@ async def create_user_with_provider(
     provider_user_id: str,
     avatar_url: str | None = None,
     provider_username: str | None = None,
+    phone_number: str | None = None,
     password: str | None = None,
 ) -> User:
     user = User(
@@ -41,6 +42,7 @@ async def create_user_with_provider(
         provider=provider,
         provider_user_id=provider_user_id,
         provider_username=provider_username,
+        phone_number=phone_number,
         password_hash=hash_password(password) if password else None,
     )
     db.add(auth_provider)

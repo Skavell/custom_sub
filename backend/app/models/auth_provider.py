@@ -24,6 +24,7 @@ class AuthProvider(Base):
     provider: Mapped[ProviderType] = mapped_column(Enum(ProviderType))
     provider_user_id: Mapped[str] = mapped_column(String(255))
     provider_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
