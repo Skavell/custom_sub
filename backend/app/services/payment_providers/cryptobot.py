@@ -31,6 +31,7 @@ class CryptoBotProvider(PaymentProvider):
             "amount": usdt_amount,
             "description": description,
             "payload": order_id,
+            "expires_in": 86400,  # 24 hours — auto-expire unpaid invoices
         }
         async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
             resp = await http.post(

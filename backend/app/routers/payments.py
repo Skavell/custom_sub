@@ -113,19 +113,25 @@ async def create_payment(
     if pending is not None:
         age = now - pending.created_at.replace(tzinfo=timezone.utc) if pending.created_at.tzinfo is None else now - pending.created_at
         if age < timedelta(minutes=_PENDING_EXPIRY_MINUTES):
-            response.status_code = 200
-            usdt_rate_str = await get_setting(db, "usdt_exchange_rate") or "83"
-            usdt_amount = str(round(pending.amount_rub / float(usdt_rate_str), 2))
-            return PaymentResponse(
-                payment_url=pending.payment_url or "",
-                transaction_id=str(pending.id),
-                amount_rub=pending.amount_rub,
-                amount_usdt=usdt_amount,
-                is_existing=True,
-            )
-        # Expired pending — mark failed
-        pending.status = TransactionStatus.failed
-        await db.commit()
+            if pending.plan_id == data.plan_id:
+                # Same plan — return the existing invoice
+                response.status_code = 200
+                usdt_rate_str = await get_setting(db, "usdt_exchange_rate") or "83"
+                usdt_amount = str(round(pending.amount_rub / float(usdt_rate_str), 2))
+                return PaymentResponse(
+                    payment_url=pending.payment_url or "",
+                    transaction_id=str(pending.id),
+                    amount_rub=pending.amount_rub,
+                    amount_usdt=usdt_amount,
+                    is_existing=True,
+                )
+            # Different plan — cancel the old invoice and create a new one
+            pending.status = TransactionStatus.failed
+            await db.commit()
+        else:
+            # Expired pending — mark failed
+            pending.status = TransactionStatus.failed
+            await db.commit()
 
     # Price calculation (may raise 400 for invalid promo)
     final_price, promo = await calculate_final_price(db, plan, current_user, data.promo_code)
@@ -264,8 +270,8 @@ async def payment_webhook(
     if tx is None:
         return Response(status_code=400)
 
-    # Idempotency
-    if tx.status == TransactionStatus.completed:
+    # Idempotency — skip already-completed or explicitly-cancelled transactions
+    if tx.status in (TransactionStatus.completed, TransactionStatus.failed):
         return Response(status_code=200)
 
     if payload.update_type == "invoice_paid" and payload.payload.status == "paid":
