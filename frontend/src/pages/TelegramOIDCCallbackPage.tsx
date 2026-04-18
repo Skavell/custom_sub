@@ -15,7 +15,7 @@ export default function TelegramOIDCCallbackPage() {
     const code = params.get("code");
 
     if (error || !code) {
-      navigate("/login?error=telegram_oidc_failed");
+      navigate("/login?error=telegram_oidc_failed", { replace: true });
       return;
     }
 
@@ -24,9 +24,10 @@ export default function TelegramOIDCCallbackPage() {
     const doAuth = async () => {
       try {
         await api.post("/api/auth/oauth/telegram-oidc", { code, redirect_uri: redirectUri });
-        navigate("/");
-      } catch {
-        navigate("/login?error=telegram_oidc_failed");
+        navigate("/", { replace: true });
+      } catch (e) {
+        console.error("Telegram OIDC failed", e);
+        navigate("/login?error=telegram_oidc_failed", { replace: true });
       }
     };
 
@@ -34,8 +35,8 @@ export default function TelegramOIDCCallbackPage() {
   }, [navigate]);
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center">
-      <p className="text-text-secondary text-sm">Вход через Telegram...</p>
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
     </div>
   );
 }
