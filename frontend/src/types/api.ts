@@ -200,6 +200,10 @@ export interface ConflictResolveRequest {
   remnawave_uuid: string
 }
 
+export interface SetRemnawaveUuidRequest {
+  remnawave_uuid: string
+}
+
 export interface SyncAllResponse {
   task_id: string
 }
