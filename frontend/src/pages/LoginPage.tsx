@@ -61,9 +61,8 @@ export default function LoginPage() {
   const handleTelegramOIDCLogin = () => {
     if (!oauthConfig?.telegram_oidc_client_id) return;
     const redirectUri = encodeURIComponent(`${window.location.origin}/auth/telegram/callback`);
-    const origin = encodeURIComponent(window.location.origin);
     const clientId = oauthConfig.telegram_oidc_client_id;
-    window.location.href = `https://oauth.telegram.org/auth?bot_id=${clientId}&origin=${origin}&response_type=code&redirect_uri=${redirectUri}&lang=en`;
+    window.location.href = `https://oauth.telegram.org/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=openid%20profile&lang=en`;
   };
 
   async function handleSubmit(e: React.FormEvent) {

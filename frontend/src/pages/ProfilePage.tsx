@@ -62,8 +62,7 @@ function startGoogleLink(clientId: string) {
 function startTelegramOIDCLink(clientId: string) {
   localStorage.setItem('telegram_oidc_intent', 'link')
   const redirectUri = encodeURIComponent(`${window.location.origin}/auth/telegram/callback`)
-  const origin = encodeURIComponent(window.location.origin)
-  window.location.href = `https://oauth.telegram.org/auth?bot_id=${clientId}&origin=${origin}&response_type=code&redirect_uri=${redirectUri}&lang=en`
+  window.location.href = `https://oauth.telegram.org/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=openid%20profile&lang=en`
 }
 
 function startVKLink(clientId: string) {
