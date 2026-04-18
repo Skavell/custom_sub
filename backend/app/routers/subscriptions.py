@@ -132,7 +132,7 @@ async def activate_trial(
     if tg_provider:
         try:
             telegram_id = int(tg_provider.provider_user_id)
-            description = f"@{tg_provider.provider_username}" if tg_provider.provider_username else None
+            description = tg_provider.provider_username or None
         except (ValueError, TypeError):
             pass
 

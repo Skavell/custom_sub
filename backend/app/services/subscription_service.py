@@ -171,7 +171,7 @@ async def sync_remnawave_by_telegram_id(
             await rw_client.update_user(
                 str(user.remnawave_uuid),
                 telegram_id=telegram_id,
-                description=f"@{telegram_username}" if telegram_username else None,
+                description=telegram_username or None,
             )
             return TelegramLinkResult(action="set_telegram_id")
 
@@ -232,7 +232,7 @@ async def sync_remnawave_by_telegram_id(
             await rw_client.update_user(
                 str(user.remnawave_uuid),
                 telegram_id=telegram_id,
-                description=f"@{telegram_username}" if telegram_username else None,
+                description=telegram_username or None,
             )
             try:
                 await rw_client.delete_user(tg_rw_user.id)
