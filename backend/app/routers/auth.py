@@ -9,7 +9,7 @@ from sqlalchemy import select as _select
 
 from app.database import get_db
 from app.redis_client import get_redis
-from app.schemas.auth import EmailRegisterRequest, EmailLoginRequest, TokenResponse, TelegramOAuthRequest, GoogleOAuthRequest, VKOAuthRequest, OAuthConfigResponse, ResetPasswordRequestSchema, ResetPasswordConfirmSchema
+from app.schemas.auth import EmailRegisterRequest, EmailLoginRequest, TokenResponse, TelegramOAuthRequest, TelegramOIDCOAuthRequest, GoogleOAuthRequest, VKOAuthRequest, OAuthConfigResponse, ResetPasswordRequestSchema, ResetPasswordConfirmSchema
 from app.services.auth.jwt_service import create_access_token, create_refresh_token, verify_token, TokenType
 from app.services.auth.password_service import verify_password, hash_password
 from app.services.user_service import create_user_with_provider, get_user_by_email, get_user_by_provider
@@ -18,6 +18,7 @@ from app.models.user import User
 from app.config import settings
 from app.deps import get_current_user
 from app.services.auth.oauth.telegram import verify_telegram_data, parse_telegram_user
+from app.services.auth.oauth.telegram_oidc import exchange_telegram_oidc_code
 from app.services.auth.oauth.google import exchange_google_code
 from app.services.auth.oauth.vk import exchange_vk_code
 from app.services.setting_service import get_setting, get_setting_decrypted
@@ -89,6 +90,12 @@ async def get_oauth_config(
 
     email_verification_required = await get_setting(db, "email_verification_enabled") == "true"
 
+    # Telegram OIDC (new Login with Telegram)
+    # Note: uses == "true" (not != "false") — intentionally default-off
+    telegram_oidc_client_id = await get_setting(db, "telegram_oidc_client_id") or None
+    telegram_oidc_enabled_flag = await get_setting(db, "telegram_oidc_enabled")
+    telegram_oidc_active = telegram_oidc_enabled_flag == "true" and bool(telegram_oidc_client_id)
+
     return OAuthConfigResponse(
         google=google_active,
         google_client_id=google_client_id if google_active else None,
@@ -96,6 +103,8 @@ async def get_oauth_config(
         vk_client_id=vk_client_id if vk_active else None,
         telegram=telegram_enabled,
         telegram_bot_username=bot_username,
+        telegram_oidc=telegram_oidc_active,
+        telegram_oidc_client_id=telegram_oidc_client_id if telegram_oidc_active else None,
         email_enabled=email_enabled,
         support_telegram_url=support_telegram_url,
         email_verification_required=email_verification_required,
@@ -246,6 +255,45 @@ async def oauth_telegram(
             provider_username=tg_user.username,
         )
         # Fail-silent Remnawave sync: try to find prior subscription by Telegram ID
+        await _sync_remnawave_on_first_telegram_login(db, user, tg_user.id, tg_user.username)
+
+    await _set_auth_cookies(response, str(user.id), redis)
+    return TokenResponse(user_id=str(user.id), display_name=user.display_name)
+
+
+@router.post("/oauth/telegram-oidc", response_model=TokenResponse)
+async def oauth_telegram_oidc(
+    data: TelegramOIDCOAuthRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    client_id = await get_setting(db, "telegram_oidc_client_id")
+    client_secret = await get_setting_decrypted(db, "telegram_oidc_client_secret")
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=503, detail="Telegram OIDC not configured")
+
+    try:
+        tg_user = await exchange_telegram_oidc_code(
+            data.code, data.redirect_uri, client_id, client_secret
+        )
+    except Exception as exc:
+        logger.exception("Telegram OIDC exchange failed: %s", exc)
+        raise HTTPException(status_code=400, detail="Telegram OIDC failed")
+
+    user = await get_user_by_provider(db, ProviderType.telegram, str(tg_user.id))
+    if not user:
+        display_name = tg_user.first_name
+        if tg_user.last_name:
+            display_name += f" {tg_user.last_name}"
+        user = await create_user_with_provider(
+            db,
+            display_name=display_name,
+            provider=ProviderType.telegram,
+            provider_user_id=str(tg_user.id),
+            avatar_url=tg_user.photo_url,
+            provider_username=tg_user.username,
+        )
         await _sync_remnawave_on_first_telegram_login(db, user, tg_user.id, tg_user.username)
 
     await _set_auth_cookies(response, str(user.id), redis)
