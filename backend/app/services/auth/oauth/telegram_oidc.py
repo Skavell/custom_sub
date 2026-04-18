@@ -1,17 +1,8 @@
-# backend/app/services/auth/oauth/telegram_oidc.py
-from dataclasses import dataclass
 import httpx
 
+from app.services.auth.oauth.telegram import TelegramUser
+
 TOKEN_URL = "https://oauth.telegram.org/auth/token"
-
-
-@dataclass
-class TelegramOIDCUser:
-    id: int
-    first_name: str
-    last_name: str | None
-    username: str | None
-    photo_url: str | None
 
 
 async def exchange_telegram_oidc_code(
@@ -19,7 +10,7 @@ async def exchange_telegram_oidc_code(
     redirect_uri: str,
     client_id: str,
     client_secret: str,
-) -> TelegramOIDCUser:
+) -> TelegramUser:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             TOKEN_URL,
@@ -34,8 +25,11 @@ async def exchange_telegram_oidc_code(
         resp.raise_for_status()
         data = resp.json()
 
+    # Telegram may return user data nested under "user" or at root level
     user = data.get("user", data)
-    return TelegramOIDCUser(
+    if "id" not in user:
+        raise ValueError("Invalid Telegram OIDC response: missing user ID")
+    return TelegramUser(
         id=int(user["id"]),
         first_name=user.get("first_name", ""),
         last_name=user.get("last_name"),
