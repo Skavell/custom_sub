@@ -109,7 +109,7 @@ export default function AdminUserDetailPage() {
 
   useEffect(() => {
     if (user) setUuidInput(user.remnawave_uuid ?? '')
-  }, [user])
+  }, [user?.remnawave_uuid]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin-user', id] })
 
