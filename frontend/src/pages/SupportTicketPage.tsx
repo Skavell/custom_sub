@@ -77,17 +77,17 @@ export function SupportTicketPage() {
         {ticket.messages.map(msg => (
           <div
             key={msg.id}
-            className={`flex ${msg.author_type === 'user' ? 'justify-start' : 'justify-end'}`}
+            className={`flex ${msg.author_type === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div className={`max-w-[85%] rounded-card px-3 py-2.5 ${
               msg.author_type === 'user'
-                ? 'bg-surface border border-border-neutral rounded-bl-sm'
-                : 'bg-accent/10 border border-accent/30 rounded-br-sm'
+                ? 'bg-accent/10 border border-accent/30 rounded-br-sm'
+                : 'bg-surface border border-border-neutral rounded-bl-sm'
             }`}>
               <p className={`text-xs mb-1 ${
-                msg.author_type === 'admin' ? 'text-accent' : 'text-text-muted'
+                msg.author_type === 'user' ? 'text-accent' : 'text-text-muted'
               }`}>
-                {msg.author_type === 'admin' ? 'Поддержка' : 'Вы'} · {new Date(msg.created_at).toLocaleString('ru')}
+                {msg.author_type === 'user' ? 'Вы' : 'Поддержка'} · {new Date(msg.created_at).toLocaleString('ru')}
               </p>
               <p className="text-sm text-text-primary whitespace-pre-wrap">{msg.text}</p>
             </div>

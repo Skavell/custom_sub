@@ -20,11 +20,28 @@ interface AdminTicketDetail {
   messages: SupportMessage[]
 }
 
+interface SubscriptionInfo {
+  type: string
+  status: string
+  expires_at: string
+}
+
+interface ProviderInfo {
+  provider: string
+  email_verified: boolean | null
+}
+
 interface UserInfo {
   id: string
   display_name: string
-  subscription: { type: string; status: string } | null
+  email: string | null
+  avatar_url: string | null
+  is_banned: boolean
+  has_made_payment: boolean
   created_at: string
+  last_seen_at: string
+  subscription: SubscriptionInfo | null
+  providers: ProviderInfo[]
 }
 
 export function AdminSupportTicketPage() {
@@ -138,31 +155,67 @@ export function AdminSupportTicketPage() {
           )}
         </div>
 
-        <div className="rounded-card border border-border-neutral bg-surface p-4 h-fit">
-          <h3 className="text-xs font-semibold text-text-muted uppercase mb-3">Пользователь</h3>
-          <p className="text-sm font-medium text-text-primary mb-0.5">{userInfo?.display_name}</p>
-          {userInfo?.subscription ? (
-            <p className={`text-xs mb-2 ${
-              userInfo.subscription.status === 'active' ? 'text-green-400' : 'text-text-muted'
-            }`}>
-              {userInfo.subscription.type === 'trial' ? 'Триал' : 'Платная'} ·{' '}
-              {userInfo.subscription.status === 'active' ? 'активна' : 'истекла'}
-            </p>
+        <div className="rounded-card border border-border-neutral bg-surface p-4 h-fit space-y-2.5">
+          <h3 className="text-xs font-semibold text-text-muted uppercase">Пользователь</h3>
+
+          {userInfo ? (
+            <>
+              <div>
+                <p className="text-sm font-medium text-text-primary">{userInfo.display_name}</p>
+                {userInfo.email && (
+                  <p className="text-xs text-text-muted">{userInfo.email}</p>
+                )}
+                {userInfo.is_banned && (
+                  <span className="text-xs text-red-400">⛔ забанен</span>
+                )}
+              </div>
+
+              <div className="border-t border-border-neutral pt-2 space-y-1">
+                {userInfo.subscription ? (
+                  <>
+                    <p className={`text-xs font-medium ${
+                      userInfo.subscription.status === 'active' ? 'text-green-400' : 'text-yellow-400'
+                    }`}>
+                      {userInfo.subscription.type === 'trial' ? 'Триал' : 'Платная подписка'} ·{' '}
+                      {userInfo.subscription.status === 'active' ? 'активна' : 'истекла'}
+                    </p>
+                    <p className="text-xs text-text-muted">
+                      До: {new Date(userInfo.subscription.expires_at).toLocaleDateString('ru')}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-text-muted">Нет подписки</p>
+                )}
+                <p className="text-xs text-text-muted">
+                  Платил: {userInfo.has_made_payment ? 'да' : 'нет'}
+                </p>
+              </div>
+
+              <div className="border-t border-border-neutral pt-2 space-y-1">
+                <p className="text-xs text-text-muted">
+                  Регистрация: {new Date(userInfo.created_at).toLocaleDateString('ru')}
+                </p>
+                <p className="text-xs text-text-muted">
+                  Был: {new Date(userInfo.last_seen_at).toLocaleString('ru')}
+                </p>
+                {userInfo.providers.length > 0 && (
+                  <p className="text-xs text-text-muted">
+                    Вход: {userInfo.providers.map(p => p.provider).join(', ')}
+                  </p>
+                )}
+              </div>
+
+              <div className="border-t border-border-neutral pt-2">
+                <Link
+                  to={`/admin/users/${ticket.user_id}`}
+                  className="text-xs text-accent hover:underline"
+                >
+                  Открыть карточку →
+                </Link>
+              </div>
+            </>
           ) : (
-            <p className="text-xs text-text-muted mb-2">Нет подписки</p>
-          )}
-          {userInfo && (
-            <p className="text-xs text-text-muted mb-3">
-              Регистрация: {new Date(userInfo.created_at).toLocaleDateString('ru')}
-            </p>
-          )}
-          {ticket.user_id && (
-            <Link
-              to={`/admin/users/${ticket.user_id}`}
-              className="text-xs text-accent hover:underline"
-            >
-              Открыть профиль →
-            </Link>
+            <p className="text-xs text-text-muted">Загрузка...</p>
           )}
         </div>
       </div>
