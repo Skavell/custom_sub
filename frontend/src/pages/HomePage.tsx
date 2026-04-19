@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query'
 import { Shield, Zap, Download, RefreshCw, AlertCircle } from 'lucide-react'
@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import type { TrialActivateResponse, SubscriptionResponse, OAuthConfigResponse } from '@/types/api'
 import EmailVerificationBanner from '@/components/EmailVerificationBanner'
 import StatusWidget from '@/components/StatusWidget'
+import { OnboardingCard } from '@/components/OnboardingCard'
 
 function StatusBadge({ status }: { status: string }) {
   const colors = {
@@ -169,6 +170,11 @@ export default function HomePage() {
     staleTime: 300_000,
   })
   const [trialError, setTrialError] = useState<string | null>(null)
+  const trialCtaRef = useRef<HTMLDivElement>(null)
+
+  const scrollToTrialCta = () => {
+    trialCtaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
 
   const showVerifyBanner =
     user?.email_verified === false &&
@@ -204,14 +210,25 @@ export default function HomePage() {
         <EmailVerificationBanner userEmail={emailProvider.identifier} />
       )}
 
+      {/* Onboarding card */}
+      {(sub === null || sub === undefined || sub.type !== 'paid') && (
+        <OnboardingCard
+          hasMadePayment={user?.has_made_payment ?? false}
+          hasSubscription={sub !== null && sub !== undefined}
+          onActivateTrial={scrollToTrialCta}
+        />
+      )}
+
       {/* Subscription block */}
       {sub === null || sub === undefined ? (
-        <TrialCTA
-          onActivate={() => trialMutation.mutate()}
-          isLoading={trialMutation.isPending}
-          error={trialError}
-          showVerifyBanner={showVerifyBanner ?? false}
-        />
+        <div ref={trialCtaRef}>
+          <TrialCTA
+            onActivate={() => trialMutation.mutate()}
+            isLoading={trialMutation.isPending}
+            error={trialError}
+            showVerifyBanner={showVerifyBanner ?? false}
+          />
+        </div>
       ) : sub.status === 'active' && sub.type === 'trial' ? (
         <TrialCard sub={sub} />
       ) : sub.status === 'active' && sub.type === 'paid' ? (
