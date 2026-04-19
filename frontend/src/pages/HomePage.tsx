@@ -29,6 +29,17 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
+function TrafficDisplay({ sub }: { sub: SubscriptionResponse }) {
+  if (sub.traffic_used_bytes === null || sub.traffic_limit_gb === null) {
+    const gb = sub.traffic_limit_gb
+    return <span>{gb != null ? `Трафик: ${gb} ГБ (пробный лимит)` : 'Трафик: недоступен'}</span>
+  }
+  const limitBytes = sub.traffic_limit_gb * 1024 ** 3
+  const remainingBytes = Math.max(0, limitBytes - sub.traffic_used_bytes)
+  const remainingGb = (remainingBytes / 1024 ** 3).toFixed(1)
+  return <span>{remainingGb} из {sub.traffic_limit_gb} ГБ осталось</span>
+}
+
 function TrialCard({ sub }: { sub: SubscriptionResponse }) {
   return (
     <div className="rounded-card bg-surface border border-border-neutral p-6">
@@ -51,7 +62,7 @@ function TrialCard({ sub }: { sub: SubscriptionResponse }) {
       </div>
       <div className="mb-5 p-3 rounded-input bg-white/5 flex items-center gap-2 text-sm text-text-secondary">
         <Zap size={14} className="text-accent shrink-0" />
-        <span>Трафик: 30 ГБ (пробный лимит)</span>
+        <TrafficDisplay sub={sub} />
       </div>
       <Link
         to="/subscription"
@@ -215,6 +226,7 @@ export default function HomePage() {
         <OnboardingCard
           hasMadePayment={user?.has_made_payment ?? false}
           hasSubscription={sub !== null && sub !== undefined}
+          hasConnected={sub?.has_connected ?? false}
           onActivateTrial={scrollToTrialCta}
         />
       )}

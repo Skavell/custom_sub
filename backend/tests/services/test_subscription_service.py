@@ -87,6 +87,8 @@ async def test_sync_subscription_from_remnawave_active():
         status="ACTIVE",
         subscription_url="https://sub.example.com/abc",
         telegram_id=None,
+        used_traffic_bytes=0,
+        first_connected_at=None,
     )
 
     await sync_subscription_from_remnawave(db, user, remnawave_user)

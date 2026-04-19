@@ -71,6 +71,8 @@ export interface SubscriptionResponse {
   expires_at: string
   traffic_limit_gb: number | null
   days_remaining: number
+  has_connected: boolean
+  traffic_used_bytes: number | null
 }
 
 export interface TrialActivateResponse {
