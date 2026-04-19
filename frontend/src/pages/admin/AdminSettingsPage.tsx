@@ -22,7 +22,7 @@ const SUPPORT_KEYS = new Set([
 const INSTALL_KEY_PREFIX = 'install_'
 
 const REMNAWAVE_KEYS = new Set([
-  'remnawave_url', 'remnawave_token',
+  'remnawave_url', 'remnawave_token', 'remnawave_webhook_secret',
   'remnawave_trial_internal_squad_uuids', 'remnawave_trial_external_squad_uuids',
   'remnawave_paid_internal_squad_uuids', 'remnawave_paid_external_squad_uuids',
 ])
@@ -49,6 +49,7 @@ const PAYMENT_KEYS = new Set([
 const SETTING_LABELS: Record<string, string> = {
   remnawave_url: 'URL сервера Remnawave',
   remnawave_token: 'API токен Remnawave',
+  remnawave_webhook_secret: 'Секрет вебхука (WEBHOOK_SECRET_HEADER)',
   remnawave_trial_internal_squad_uuids: 'Внутренние сквады (триал)',
   remnawave_trial_external_squad_uuids: 'Внешние сквады (триал)',
   remnawave_paid_internal_squad_uuids: 'Внутренние сквады (платная)',
@@ -677,7 +678,11 @@ export default function AdminSettingsPage() {
         )
 
         // Split remnawave keys into API config vs squad assignments
-        const rw_api = remnawave.filter(s => s.key === 'remnawave_url' || s.key === 'remnawave_token')
+        const rw_api = remnawave.filter(
+          s => s.key === 'remnawave_url' ||
+               s.key === 'remnawave_token' ||
+               s.key === 'remnawave_webhook_secret'
+        )
         const rw_trial_squads = remnawave.filter(s => s.key.startsWith('remnawave_trial_') && s.key.endsWith('_squad_uuids'))
         const rw_paid_squads = remnawave.filter(s => s.key.startsWith('remnawave_paid_') && s.key.endsWith('_squad_uuids'))
 
