@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -51,11 +52,51 @@ def _to_response(
 async def get_my_subscription(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> SubscriptionResponse | None:
     sub = await get_user_subscription(db, current_user.id)
     if sub is None:
         return None
-    return _to_response(sub)
+
+    has_connected = current_user.first_connected_at is not None
+    traffic_used_bytes: int | None = None
+
+    if current_user.remnawave_uuid is not None:
+        cache_key = f"rw:user_data:{current_user.id}"
+        cached_raw = await redis.get(cache_key)
+
+        if cached_raw is not None:
+            rw_data = json.loads(cached_raw)
+        else:
+            remnawave_url = await get_setting(db, "remnawave_url")
+            remnawave_token = await get_setting_decrypted(db, "remnawave_token")
+            rw_data = None
+            if remnawave_url and remnawave_token:
+                try:
+                    rw_user = await RemnawaveClient(remnawave_url, remnawave_token).get_user(
+                        str(current_user.remnawave_uuid)
+                    )
+                    rw_data = {
+                        "used_traffic_bytes": rw_user.used_traffic_bytes,
+                        "first_connected_at": rw_user.first_connected_at.isoformat()
+                        if rw_user.first_connected_at else None,
+                    }
+                    await redis.setex(cache_key, 300, json.dumps(rw_data))
+                except Exception:
+                    logger.warning("Failed to fetch Remnawave user data for %s", current_user.id)
+
+        if rw_data:
+            if current_user.first_connected_at is None and rw_data.get("first_connected_at"):
+                current_user.first_connected_at = datetime.fromisoformat(
+                    rw_data["first_connected_at"]
+                )
+                await db.commit()
+                has_connected = True
+
+            if sub.type.value == "trial":
+                traffic_used_bytes = rw_data.get("used_traffic_bytes")
+
+    return _to_response(sub, has_connected=has_connected, traffic_used_bytes=traffic_used_bytes)
 
 
 @router.post("/trial", response_model=TrialActivateResponse, status_code=201)
