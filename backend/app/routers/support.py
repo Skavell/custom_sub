@@ -109,7 +109,7 @@ async def create_ticket(
             ticket_number=ticket.number,
             user_display_name=user_display_name,
             user_email=user_email,
-            subscription_status=None,
+            subscription_status=_get_subscription_status(current_user),
             text=body.text,
         )
         if tg_message_id:
@@ -206,7 +206,7 @@ async def add_message(
             ticket_number=ticket_number,
             user_display_name=user_display_name,
             user_email=user_email,
-            subscription_status=None,
+            subscription_status=_get_subscription_status(current_user),
             text=body.text,
         )
         if tg_message_id:
@@ -224,3 +224,12 @@ def _get_user_email(user: User) -> str | None:
         if provider.provider == 'email':
             return provider.provider_user_id
     return None
+
+
+def _get_subscription_status(user: User) -> str | None:
+    sub = getattr(user, 'subscription', None)
+    if not sub:
+        return None
+    label = "триал" if sub.type.value == "trial" else "платная"
+    status = "активна" if sub.status.value == "active" else "истекла"
+    return f"{label} · {status}"
