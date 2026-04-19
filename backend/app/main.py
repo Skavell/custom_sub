@@ -3,6 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.database import AsyncSessionLocal
+from app.services.telegram_bot import start_polling, stop_polling
 from app.routers import auth
 from app.routers import users
 from app.routers import plans
@@ -17,9 +19,21 @@ from app.routers import admin
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # TODO (Task 4-5): init DB engine and run startup checks here
+    # Start Telegram bot polling if configured
+    try:
+        from app.services.setting_service import get_setting_decrypted
+        async with AsyncSessionLocal() as db:
+            token = await get_setting_decrypted(db, "telegram_bot_token")
+            chat_id = await get_setting_decrypted(db, "telegram_support_chat_id")
+            if token and chat_id:
+                await start_polling(token, chat_id)
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"Could not start Telegram polling: {e}")
+
     yield
-    # TODO (Task 4-5): dispose DB engine on shutdown
+
+    await stop_polling()
 
 
 app = FastAPI(
