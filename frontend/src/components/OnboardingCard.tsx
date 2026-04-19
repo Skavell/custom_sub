@@ -16,7 +16,7 @@ export function OnboardingCard({ hasMadePayment, hasSubscription, onActivateTria
   const navigate = useNavigate()
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(LS_DISMISSED) === 'true')
   const [completed, setCompleted] = useState(() => localStorage.getItem(LS_COMPLETED) === 'true')
-  const [installVisited, setInstallVisited] = useState(() => localStorage.getItem(LS_INSTALL_VISITED) === 'true')
+  const [installVisited] = useState(() => localStorage.getItem(LS_INSTALL_VISITED) === 'true')
   const [celebrating, setCelebrating] = useState(false)
 
   const steps = [
