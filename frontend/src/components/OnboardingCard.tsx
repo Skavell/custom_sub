@@ -5,18 +5,17 @@ import { X } from 'lucide-react'
 interface Props {
   hasMadePayment: boolean
   hasSubscription: boolean
+  hasConnected: boolean
   onActivateTrial: () => void
 }
 
 const LS_DISMISSED = 'onboarding_dismissed'
 const LS_COMPLETED = 'onboarding_completed'
-const LS_INSTALL_VISITED = 'install_visited'
 
-export function OnboardingCard({ hasMadePayment, hasSubscription, onActivateTrial }: Props) {
+export function OnboardingCard({ hasMadePayment, hasSubscription, hasConnected, onActivateTrial }: Props) {
   const navigate = useNavigate()
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(LS_DISMISSED) === 'true')
   const [completed, setCompleted] = useState(() => localStorage.getItem(LS_COMPLETED) === 'true')
-  const [installVisited] = useState(() => localStorage.getItem(LS_INSTALL_VISITED) === 'true')
   const [celebrating, setCelebrating] = useState(false)
 
   const steps = [
@@ -33,15 +32,15 @@ export function OnboardingCard({ hasMadePayment, hasSubscription, onActivateTria
       action: hasSubscription ? null : onActivateTrial,
     },
     {
-      label: 'Установить приложение',
-      done: installVisited && hasSubscription,
+      label: 'Установить приложение и подключиться',
+      done: hasConnected,
       locked: !hasSubscription,
       action: () => navigate('/install'),
     },
     {
       label: 'Продлить подписку',
       done: hasMadePayment,
-      locked: !(installVisited && hasSubscription),
+      locked: !hasConnected,
       action: () => navigate('/subscription'),
     },
   ]
