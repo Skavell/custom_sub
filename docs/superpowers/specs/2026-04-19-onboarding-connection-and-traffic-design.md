@@ -19,8 +19,9 @@ Two related features:
 
 Approach C — webhook as primary, API fallback on subscription fetch.
 
-- **Primary path (webhook):** Remnawave sends `POST /api/webhooks/remnawave` with event `user.first_connected`. Backend validates HMAC-SHA256 signature, finds user by `remnawave_uuid`, writes `first_connected_at` from `data.userTraffic.firstConnectedAt` to DB. Instant, zero polling overhead.
+- **Primary path (webhook):** Remnawave sends `POST /api/webhooks/remnawave` with event `user.first_connected`. Backend validates HMAC-SHA256 signature, finds user by `remnawave_uuid`, writes `first_connected_at` from `data.userTraffic.firstConnectedAt` to DB.
 - **Fallback path (API):** On every `GET /api/subscriptions/me`, if `user.first_connected_at` is still null, backend checks the cached Remnawave user data (TTL 5 min). If `firstConnectedAt` is not null there, it writes it to DB and returns `has_connected: true`. This catches any missed webhooks.
+- **Edge case — webhook arrives before `remnawave_uuid` is set:** Extremely unlikely (trial activation happens before any connection), but if it occurs, the user won't be found by `remnawave_uuid` and the write is skipped. The fallback path on subscription fetch will catch it on next page load. No retry logic needed.
 
 ### DB Change
 
@@ -34,9 +35,9 @@ Alembic migration required.
 
 ### New Setting
 
-`remnawave_webhook_secret` — encrypted, empty by default. Exposed in admin panel under Remnawave > "Подключение к API". If empty, webhook endpoint returns 401.
+`remnawave_webhook_secret` — stored in DB, seeded with `is_sensitive=False` and `{"value": ""}`. The `SettingRow` save path in the admin will encrypt it when the admin first sets a real value (same pattern as other settings). If the value is empty after fetching via `get_setting_decrypted`, the webhook endpoint returns 401.
 
-Seed migration: insert setting with `is_secret=True`, value `""`.
+Exposed in admin panel: add to `REMNAWAVE_KEYS` (this automatically excludes it from `otherSettings` as well) and add to `rw_api` filter so it renders under "Подключение к API" alongside URL and token.
 
 ---
 
@@ -65,11 +66,16 @@ class RemnawaveUser:
     status: str
     subscription_url: str
     telegram_id: int | None
-    used_traffic_bytes: int          # NEW — from userTraffic.usedTrafficBytes
-    first_connected_at: datetime | None  # NEW — from userTraffic.firstConnectedAt
+    used_traffic_bytes: int           # NEW — from userTraffic.usedTrafficBytes (default 0)
+    first_connected_at: datetime | None  # NEW — from userTraffic.firstConnectedAt (nullable)
 ```
 
-Update `_parse_user` to read from `data["userTraffic"]` (gracefully handle missing key with `or {}`).
+Update `_parse_user`: read `user_traffic = data.get("userTraffic") or {}`. Parse `firstConnectedAt` with a null guard:
+
+```python
+fca_str = user_traffic.get("firstConnectedAt")
+first_connected_at = datetime.fromisoformat(fca_str.replace("Z", "+00:00")) if fca_str else None
+```
 
 ### `models/user.py`
 
@@ -89,7 +95,7 @@ class SubscriptionResponse(BaseModel):
     expires_at: datetime
     traffic_limit_gb: int | None
     days_remaining: int
-    has_connected: bool          # NEW
+    has_connected: bool           # NEW
     traffic_used_bytes: int | None  # NEW — None for paid subscriptions
 ```
 
@@ -97,18 +103,42 @@ class SubscriptionResponse(BaseModel):
 
 `POST /api/webhooks/remnawave`
 
-- Read raw body bytes via `Request.body()` before JSON parsing (required for HMAC).
-- Validate `X-Remnawave-Signature` header: `HMAC-SHA256(raw_body, webhook_secret)`, compared with `hmac.compare_digest`.
-- If secret not configured or signature invalid → 401.
-- Parse JSON body into `RemnawaveWebhookPayload` (fields: `event: str`, `data: dict`).
-- If `event != "user.first_connected"` → return 200 immediately (ignore other events gracefully).
-- Extract `data["uuid"]` → query `User` by `remnawave_uuid`.
-- If user found and `user.first_connected_at is None`:
-  - Parse `data["userTraffic"]["firstConnectedAt"]` as datetime.
-  - Write to DB.
-- Return `{"ok": True}` with status 200 always (prevents Remnawave from retrying valid deliveries).
+**Signature validation:**
+- Read raw body as bytes via `await Request.body()` before JSON parsing (required for correct HMAC).
+- Fetch `X-Remnawave-Signature` header.
+- Fetch `remnawave_webhook_secret` via `get_setting_decrypted`. If empty → 401.
+- Compute: `hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()` (secret first, body second).
+- Compare with `hmac.compare_digest(computed, header_signature)`. If mismatch → 401.
+
+**Logic:**
+1. Parse body JSON. If `event != "user.first_connected"` → return 200 (ignore gracefully).
+2. Extract `data["uuid"]` → query `User` by `remnawave_uuid`.
+3. If user not found → return 200 (handles race condition where webhook arrives before uuid is set; fallback covers it).
+4. If `user.first_connected_at is None`:
+   - Read `fca_str = data.get("userTraffic", {}).get("firstConnectedAt")`.
+   - If `fca_str` is null or missing → skip write, return 200 (do not use `now()` fallback).
+   - Otherwise parse and write `user.first_connected_at = datetime.fromisoformat(fca_str...)`.
+5. Return `{"ok": True}` with status 200 always.
 
 ### `routers/subscriptions.py`
+
+Update `_to_response` signature:
+
+```python
+def _to_response(
+    sub,
+    has_connected: bool = False,
+    traffic_used_bytes: int | None = None,
+) -> SubscriptionResponse:
+    ...
+    return SubscriptionResponse(
+        ...,
+        has_connected=has_connected,
+        traffic_used_bytes=traffic_used_bytes,
+    )
+```
+
+`POST /api/subscriptions/trial` calls `_to_response(sub)` — defaults `has_connected=False, traffic_used_bytes=None` are correct at activation time (user has never connected yet).
 
 Update `GET /api/subscriptions/me`:
 
@@ -152,24 +182,26 @@ async def get_my_subscription(
                 rw_data = None
 
         if rw_data:
-            # Update first_connected_at in DB if webhook was missed
+            # Fallback: write first_connected_at if webhook was missed.
+            # Note: if webhook already wrote it, first_connected_at is not None
+            # so this branch is skipped — no cache invalidation needed.
             if current_user.first_connected_at is None and rw_data.get("first_connected_at"):
-                current_user.first_connected_at = datetime.fromisoformat(rw_data["first_connected_at"])
+                current_user.first_connected_at = datetime.fromisoformat(
+                    rw_data["first_connected_at"]
+                )
                 await db.commit()
                 has_connected = True
 
-            # Traffic only for trial
             if sub.type.value == "trial":
                 traffic_used_bytes = rw_data.get("used_traffic_bytes")
 
     return _to_response(sub, has_connected=has_connected, traffic_used_bytes=traffic_used_bytes)
 ```
 
-Update `_to_response` to accept and forward `has_connected` and `traffic_used_bytes`.
+Remnawave is unreachable → `rw_data = None` → response still returns with `has_connected` from DB and `traffic_used_bytes=None`. Never blocks the response.
 
 ### `main.py`
 
-Register new router:
 ```python
 from app.routers import remnawave_webhook
 app.include_router(remnawave_webhook.router)
@@ -177,8 +209,8 @@ app.include_router(remnawave_webhook.router)
 
 ### Alembic migrations (2 new)
 
-1. `add_first_connected_at_to_users` — adds nullable `first_connected_at` column.
-2. `seed_remnawave_webhook_secret` — inserts `remnawave_webhook_secret` setting with `is_secret=True`, value `""`.
+1. `add_first_connected_at_to_users` — adds nullable `first_connected_at TIMESTAMPTZ` column to `users`.
+2. `seed_remnawave_webhook_secret` — inserts setting `remnawave_webhook_secret` with `is_sensitive=False`, `{"value": ""}`, using `ON CONFLICT DO NOTHING` pattern from existing seed migrations.
 
 ---
 
@@ -194,7 +226,7 @@ export interface SubscriptionResponse {
   expires_at: string
   traffic_limit_gb: number | null
   days_remaining: number
-  has_connected: boolean        // NEW
+  has_connected: boolean         // NEW
   traffic_used_bytes: number | null  // NEW
 }
 ```
@@ -218,17 +250,19 @@ export interface SubscriptionResponse {
 />
 ```
 
-`TrialCard` traffic display:
+`TrialCard` traffic display — replace hardcoded `<span>Трафик: 30 ГБ (пробный лимит)</span>` with:
+
 ```tsx
 function TrafficDisplay({ sub }: { sub: SubscriptionResponse }) {
   if (sub.traffic_used_bytes === null || sub.traffic_limit_gb === null) {
-    return <span>Трафик: {sub.traffic_limit_gb} ГБ (пробный лимит)</span>
+    // Fallback: traffic_limit_gb null means no data at all
+    const gb = sub.traffic_limit_gb
+    return <span>{gb != null ? `Трафик: ${gb} ГБ (пробный лимит)` : 'Трафик: недоступен'}</span>
   }
   const limitBytes = sub.traffic_limit_gb * 1024 ** 3
   const remainingBytes = Math.max(0, limitBytes - sub.traffic_used_bytes)
   const remainingGb = (remainingBytes / 1024 ** 3).toFixed(1)
-  const limitGb = sub.traffic_limit_gb
-  return <span>{remainingGb} из {limitGb} ГБ осталось</span>
+  return <span>{remainingGb} из {sub.traffic_limit_gb} ГБ осталось</span>
 }
 ```
 
@@ -236,9 +270,9 @@ Used inside the existing `<Zap>` row in `TrialCard`.
 
 ### `pages/admin/AdminSettingsPage.tsx`
 
-- Add `'remnawave_webhook_secret'` to `REMNAWAVE_KEYS`.
+- Add `'remnawave_webhook_secret'` to `REMNAWAVE_KEYS` (this also auto-excludes it from `otherSettings`).
 - Add to `SETTING_LABELS`: `remnawave_webhook_secret: 'Секрет вебхука (WEBHOOK_SECRET_HEADER)'`.
-- The existing `rw_api` filter (`key === 'remnawave_url' || key === 'remnawave_token'`) must be expanded to include `remnawave_webhook_secret`:
+- Expand `rw_api` filter:
   ```typescript
   const rw_api = remnawave.filter(
     s => s.key === 'remnawave_url' ||
@@ -253,15 +287,14 @@ Used inside the existing `<Zap>` row in `TrialCard`.
 
 ```
 [Remnawave] --webhook user.first_connected--> POST /api/webhooks/remnawave
-  → validate HMAC signature
-  → find User by remnawave_uuid
-  → write first_connected_at from userTraffic.firstConnectedAt
+  → validate HMAC-SHA256: hmac.new(secret, raw_body, sha256).hexdigest()
+  → if firstConnectedAt present: find User by remnawave_uuid, write to DB
+  → always return 200
 
 [Frontend] --GET /api/subscriptions/me--> Backend
-  → read sub from DB
-  → if remnawave_uuid set: check Redis cache (TTL 5 min)
-    → if miss: call Remnawave GET /users/{uuid}
-    → cache result
+  → read sub + user.first_connected_at from DB
+  → if remnawave_uuid set: Redis cache (rw:user_data:{id}, TTL 5 min)
+    → if miss: call Remnawave GET /users/{uuid} (non-blocking on failure)
   → if first_connected_at null in DB but found in cache → write to DB
   → return SubscriptionResponse { has_connected, traffic_used_bytes }
 
@@ -273,6 +306,6 @@ Used inside the existing `<Zap>` row in `TrialCard`.
 
 ## Out of Scope
 
-- Webhook retry handling (Remnawave retries automatically if we return non-2xx; we always return 200).
+- Webhook retry handling (Remnawave retries if non-2xx; we always return 200).
 - Support for other webhook events (ignored gracefully).
-- Traffic display for paid users (they have unlimited traffic, no change needed).
+- Traffic display for paid users (unlimited, no change needed).
