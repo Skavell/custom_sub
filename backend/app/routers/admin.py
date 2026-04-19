@@ -7,7 +7,7 @@ from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from redis.asyncio import Redis
-from sqlalchemy import select, cast, or_, exists, String
+from sqlalchemy import select, cast, func, or_, exists, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -16,11 +16,12 @@ from sqlalchemy.exc import IntegrityError
 from app.database import get_db
 from app.deps import require_admin
 from app.models.article import Article
-from app.models.auth_provider import AuthProvider
+from app.models.auth_provider import AuthProvider, ProviderType
 from app.models.plan import Plan
 from app.models.promo_code import PromoCode, PromoCodeType
 from app.models.setting import Setting
 from app.models.support_message import SupportMessage
+from app.models.support_ticket import SupportTicket
 from app.models.subscription import Subscription, SubscriptionStatus
 from app.models.transaction import Transaction
 from app.models.user import User
@@ -47,9 +48,11 @@ from app.schemas.admin import (
     UserAdminDetail,
     UserAdminListItem,
 )
+from app.schemas.support import (SupportTicketAdminOut, SupportTicketDetailOut, AddMessageRequest, SupportMessageOut,)
 from app.services.admin_sync_service import run_sync_all
 from app.services.remnawave_client import RemnawaveClient
 from app.services.setting_service import get_setting, get_setting_decrypted, set_setting
+from app.services.user_notifier import notify_user_on_reply
 from app.services.subscription_service import sync_subscription_from_remnawave
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -672,3 +675,128 @@ async def admin_list_support_messages(
     )
     messages = result.scalars().all()
     return [SupportMessageAdminItem.model_validate(m) for m in messages]
+
+
+@router.get("/support-tickets", response_model=list[SupportTicketAdminOut])
+async def admin_list_support_tickets(
+    status: str | None = None,
+    search: str | None = None,
+    skip: int = 0,
+    limit: int = 50,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[SupportTicketAdminOut]:
+    q = select(SupportTicket).order_by(SupportTicket.updated_at.desc())
+    if status in ("open", "closed"):
+        q = q.where(SupportTicket.status == status)
+    if search:
+        q = q.where(SupportTicket.subject.ilike(f"%{search}%"))
+    q = q.offset(skip).limit(limit)
+    result = await db.execute(q)
+    tickets = result.scalars().all()
+
+    out = []
+    for t in tickets:
+        msg_count_result = await db.execute(
+            select(func.count(SupportMessage.id)).where(SupportMessage.ticket_id == t.id)
+        )
+        msg_count = msg_count_result.scalar() or 0
+
+        provider_result = await db.execute(
+            select(AuthProvider).where(
+                AuthProvider.user_id == t.user_id,
+                AuthProvider.provider == ProviderType.email,
+            )
+        )
+        email_provider = provider_result.scalar_one_or_none()
+
+        user_result = await db.execute(select(User).where(User.id == t.user_id))
+        user = user_result.scalar_one_or_none()
+
+        out.append(SupportTicketAdminOut(
+            id=t.id,
+            number=t.number,
+            subject=t.subject,
+            status=t.status,
+            created_at=t.created_at,
+            updated_at=t.updated_at,
+            user_id=t.user_id,
+            user_display_name=user.display_name if user else "?",
+            user_email=email_provider.provider_user_id if email_provider else None,
+            message_count=msg_count,
+        ))
+    return out
+
+
+@router.get("/support-tickets/{ticket_id}", response_model=SupportTicketDetailOut)
+async def admin_get_support_ticket(
+    ticket_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> SupportTicketDetailOut:
+    result = await db.execute(
+        select(SupportTicket)
+        .where(SupportTicket.id == ticket_id)
+        .options(selectinload(SupportTicket.messages))
+    )
+    ticket = result.scalar_one_or_none()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Обращение не найдено")
+
+    return SupportTicketDetailOut(
+        id=ticket.id,
+        number=ticket.number,
+        subject=ticket.subject,
+        status=ticket.status,
+        created_at=ticket.created_at,
+        updated_at=ticket.updated_at,
+        messages=[SupportMessageOut(
+            id=m.id, author_type=m.author_type, text=m.text, created_at=m.created_at
+        ) for m in ticket.messages],
+    )
+
+
+@router.post("/support-tickets/{ticket_id}/messages", response_model=SupportMessageOut, status_code=201)
+async def admin_reply_to_ticket(
+    ticket_id: uuid.UUID,
+    body: AddMessageRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> SupportMessageOut:
+    result = await db.execute(select(SupportTicket).where(SupportTicket.id == ticket_id))
+    ticket = result.scalar_one_or_none()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Обращение не найдено")
+
+    message = SupportMessage(
+        ticket_id=ticket.id,
+        author_type="admin",
+        text=body.text,
+        is_read_by_user=False,
+    )
+    ticket.updated_at = datetime.now(timezone.utc)
+    db.add(message)
+    await db.commit()
+    await db.refresh(message)
+
+    await notify_user_on_reply(db=db, ticket=ticket, reply_text=body.text)
+
+    return SupportMessageOut(
+        id=message.id, author_type=message.author_type,
+        text=message.text, created_at=message.created_at,
+    )
+
+
+@router.post("/support-tickets/{ticket_id}/close")
+async def admin_close_ticket(
+    ticket_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(select(SupportTicket).where(SupportTicket.id == ticket_id))
+    ticket = result.scalar_one_or_none()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Обращение не найдено")
+    ticket.status = "closed"
+    await db.commit()
+    return {"ok": True}
