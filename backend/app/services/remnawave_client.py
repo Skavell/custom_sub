@@ -20,11 +20,18 @@ class RemnawaveUser:
     status: str               # "ACTIVE" | "DISABLED"
     subscription_url: str
     telegram_id: int | None
+    used_traffic_bytes: int
+    first_connected_at: datetime | None
 
 
 def _parse_user(data: dict[str, Any]) -> RemnawaveUser:
     if "response" in data:
         data = data["response"]
+    user_traffic = data.get("userTraffic") or {}
+    fca_str = user_traffic.get("firstConnectedAt")
+    first_connected_at = (
+        datetime.fromisoformat(fca_str.replace("Z", "+00:00")) if fca_str else None
+    )
     return RemnawaveUser(
         id=data["uuid"],
         username=data["username"],
@@ -33,6 +40,8 @@ def _parse_user(data: dict[str, Any]) -> RemnawaveUser:
         status=data.get("status", "ACTIVE"),
         subscription_url=data.get("subscriptionUrl", ""),
         telegram_id=data.get("telegramId"),
+        used_traffic_bytes=user_traffic.get("usedTrafficBytes") or 0,
+        first_connected_at=first_connected_at,
     )
 
 
