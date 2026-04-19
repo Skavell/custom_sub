@@ -19,6 +19,9 @@ class User(Base):
     subscription_conflict: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    first_connected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     auth_providers: Mapped[list["AuthProvider"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     subscription: Mapped["Subscription | None"] = relationship(back_populates="user", uselist=False)
