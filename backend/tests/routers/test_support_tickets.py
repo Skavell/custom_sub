@@ -59,7 +59,7 @@ async def test_create_ticket_returns_201():
     app.dependency_overrides[get_db] = _override_db(db)
 
     try:
-        with patch("app.routers.support.send_admin_support_notification"):
+        with patch("app.routers.support.get_support_settings", return_value=None):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
                 resp = await c.post(
                     "/api/support/tickets",
