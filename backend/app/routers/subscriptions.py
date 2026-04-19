@@ -25,7 +25,11 @@ _TRIAL_RATE_LIMIT = 3
 _TRIAL_RATE_WINDOW = 86400  # 24 hours
 
 
-def _to_response(sub) -> SubscriptionResponse:
+def _to_response(
+    sub,
+    has_connected: bool = False,
+    traffic_used_bytes: int | None = None,
+) -> SubscriptionResponse:
     now = datetime.now(tz=timezone.utc)
     expires = sub.expires_at
     if expires.tzinfo is None:
@@ -38,6 +42,8 @@ def _to_response(sub) -> SubscriptionResponse:
         expires_at=expires,
         traffic_limit_gb=sub.traffic_limit_gb,
         days_remaining=days_remaining,
+        has_connected=has_connected,
+        traffic_used_bytes=traffic_used_bytes,
     )
 
 

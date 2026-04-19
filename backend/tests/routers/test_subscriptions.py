@@ -22,6 +22,7 @@ def _make_user(remnawave_uuid=None) -> User:
     user.id = uuid.uuid4()
     user.remnawave_uuid = uuid.UUID(str(remnawave_uuid)) if remnawave_uuid else None
     user.has_made_payment = False
+    user.first_connected_at = None
     return user
 
 
