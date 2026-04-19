@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -80,6 +80,10 @@ export default function InstallPage() {
     queryFn: () => api.get<InstallAppConfig>('/api/install/app-config'),
     staleTime: 10 * 60_000,
   })
+
+  useEffect(() => {
+    localStorage.setItem('install_visited', 'true')
+  }, [])
 
   const is403 = error instanceof ApiError && error.status === 403
   const subLink = installData?.subscription_url ?? ''
