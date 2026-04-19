@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Smartphone, Monitor, Terminal, Download, ExternalLink, Copy, Check, ChevronRight, ChevronLeft, AlertTriangle } from 'lucide-react'
@@ -65,6 +66,7 @@ export default function InstallPage() {
   const { user } = useAuth()
   const [activeOS, setActiveOS] = useState<OS>(detectOS)
   const [step, setStep] = useState<1 | 2>(1)
+  const [qrVisible, setQrVisible] = useState(false)
 
   const { data: installData, isLoading, error } = useQuery<InstallLinkResponse>({
     queryKey: ['subscriptionLink'],
@@ -218,6 +220,40 @@ export default function InstallPage() {
               <div className="flex items-center gap-2 bg-background rounded-input p-3">
                 <code className="flex-1 text-xs text-text-secondary break-all">{subLink}</code>
                 <CopyButton text={subLink} />
+              </div>
+
+              <div className="flex items-center gap-2 my-3">
+                <div className="flex-1 h-px bg-border-neutral" />
+                <span className="text-xs text-text-muted">или</span>
+                <div className="flex-1 h-px bg-border-neutral" />
+              </div>
+
+              <button
+                onClick={() => setQrVisible(v => !v)}
+                className="w-full flex items-center justify-center gap-2 border border-dashed border-border-neutral rounded-input p-2.5 text-sm text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
+              >
+                <span className="text-base">▦</span>
+                {qrVisible ? 'Скрыть QR-код' : 'Показать QR-код'}
+                <span
+                  className="ml-auto text-text-muted transition-transform duration-200"
+                  style={{ transform: qrVisible ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                >
+                  ▾
+                </span>
+              </button>
+
+              <div
+                className="overflow-hidden transition-all duration-300"
+                style={{ maxHeight: qrVisible ? '240px' : '0px', opacity: qrVisible ? 1 : 0 }}
+              >
+                <div className="flex flex-col items-center gap-3 pt-4">
+                  <div className="bg-white rounded-lg p-3">
+                    <QRCodeSVG value={subLink} size={140} />
+                  </div>
+                  <p className="text-xs text-text-muted text-center">
+                    Наведи камеру телефона на QR-код
+                  </p>
+                </div>
               </div>
             </div>
           )}
