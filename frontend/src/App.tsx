@@ -9,7 +9,7 @@ import SubscriptionPage from '@/pages/SubscriptionPage'
 import InstallPage from '@/pages/InstallPage'
 import DocsPage from '@/pages/DocsPage'
 import DocsArticlePage from '@/pages/DocsArticlePage'
-import SupportPage from '@/pages/SupportPage'
+import { SupportPage } from '@/pages/SupportPage'
 import ProfilePage from '@/pages/ProfilePage'
 import NotFoundPage from '@/pages/NotFoundPage'
 import GoogleCallbackPage from '@/pages/GoogleCallbackPage'
@@ -23,7 +23,9 @@ import AdminPromoCodesPage from '@/pages/admin/AdminPromoCodesPage'
 import AdminArticlesPage from '@/pages/admin/AdminArticlesPage'
 import AdminArticleEditPage from '@/pages/admin/AdminArticleEditPage'
 import AdminSettingsPage from '@/pages/admin/AdminSettingsPage'
-import AdminSupportMessagesPage from '@/pages/admin/AdminSupportMessagesPage'
+import { AdminSupportMessagesPage } from '@/pages/admin/AdminSupportMessagesPage'
+import { AdminSupportTicketPage } from '@/pages/admin/AdminSupportTicketPage'
+import { SupportTicketPage } from '@/pages/SupportTicketPage'
 import VerifyEmailPage from '@/pages/VerifyEmailPage'
 import ResetPasswordPage from '@/pages/ResetPasswordPage'
 
@@ -53,6 +55,7 @@ export default function App() {
             <Route path="/admin/articles/:id/edit" element={<AdminArticleEditPage />} />
             <Route path="/admin/settings" element={<AdminSettingsPage />} />
             <Route path="/admin/support-messages" element={<AdminSupportMessagesPage />} />
+            <Route path="/admin/support-tickets/:ticketId" element={<AdminSupportTicketPage />} />
           </Route>
         </Route>
 
@@ -65,6 +68,7 @@ export default function App() {
             <Route path="/docs" element={<DocsPage />} />
             <Route path="/docs/:slug" element={<DocsArticlePage />} />
             <Route path="/support" element={<SupportPage />} />
+            <Route path="/support/:ticketId" element={<SupportTicketPage />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>

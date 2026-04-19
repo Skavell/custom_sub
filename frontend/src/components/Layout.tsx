@@ -1,7 +1,9 @@
 import { Outlet, NavLink } from 'react-router-dom'
 import { Home, CreditCard, Download, BookOpen, MessageCircle, User } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
+import { api } from '@/lib/api'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Главная', icon: Home, exact: true },
@@ -12,9 +14,10 @@ const NAV_ITEMS = [
   { to: '/profile', label: 'Профиль', icon: User, exact: false },
 ] as const
 
-type NavItemProps = (typeof NAV_ITEMS)[number]
+type NavItemProps = (typeof NAV_ITEMS)[number] & { supportUnread?: number }
 
-function NavItem({ to, label, icon: Icon, exact }: NavItemProps) {
+function NavItem({ to, label, icon: Icon, exact, supportUnread }: NavItemProps) {
+  const isSupport = to === '/support'
   return (
     <NavLink
       to={to}
@@ -30,12 +33,24 @@ function NavItem({ to, label, icon: Icon, exact }: NavItemProps) {
     >
       <Icon size={18} />
       <span>{label}</span>
+      {isSupport && supportUnread != null && supportUnread > 0 && (
+        <span className="ml-auto text-[10px] bg-accent text-white min-w-[16px] h-[16px] flex items-center justify-center rounded-full px-1">
+          {supportUnread}
+        </span>
+      )}
     </NavLink>
   )
 }
 
 export default function Layout() {
   const { user } = useAuth()
+
+  const { data: supportTickets = [] } = useQuery<Array<{ unread_count: number }>>({
+    queryKey: ['support-tickets'],
+    queryFn: () => api.get('/api/support/tickets'),
+    refetchInterval: 60_000,
+  })
+  const supportUnread = supportTickets.reduce((sum, t) => sum + (t.unread_count ?? 0), 0)
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -50,7 +65,7 @@ export default function Layout() {
         {/* Nav */}
         <nav className="flex flex-col gap-1 flex-1">
           {NAV_ITEMS.map((item) => (
-            <NavItem key={item.to} {...item} />
+            <NavItem key={item.to} {...item} supportUnread={supportUnread} />
           ))}
         </nav>
         {/* User badge */}
@@ -83,7 +98,18 @@ export default function Layout() {
               )
             }
           >
-            <Icon size={20} />
+            {to === '/support' ? (
+              <div className="relative">
+                <Icon size={20} />
+                {supportUnread > 0 && (
+                  <span className="absolute -top-1 -right-1 text-[9px] bg-accent text-white w-3.5 h-3.5 flex items-center justify-center rounded-full">
+                    {supportUnread}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <Icon size={20} />
+            )}
             <span className="text-[10px]">{label}</span>
           </NavLink>
         ))}

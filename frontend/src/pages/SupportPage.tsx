@@ -1,116 +1,144 @@
 import { useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { Send, MessageCircle, Loader2 } from 'lucide-react'
-import { useAuth } from '@/hooks/useAuth'
-import { api, ApiError } from '@/lib/api'
-import type { OAuthConfigResponse } from '@/types/api'
+import { useNavigate } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { MessageCircle, ChevronRight, Plus } from 'lucide-react'
+import { api } from '@/lib/api'
 
-export default function SupportPage() {
-  const { user } = useAuth()
-  const [message, setMessage] = useState('')
-  const [sent, setSent] = useState(false)
+interface SupportTicket {
+  id: string
+  number: number
+  subject: string
+  status: 'open' | 'closed'
+  updated_at: string
+  unread_count: number
+}
 
-  const { data: oauthConfig } = useQuery<OAuthConfigResponse>({
-    queryKey: ['oauth-config'],
-    queryFn: () => api.get<OAuthConfigResponse>('/api/auth/oauth-config'),
-    staleTime: 5 * 60_000,
+interface CreateTicketPayload {
+  subject: string
+  text: string
+}
+
+export function SupportPage() {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [subject, setSubject] = useState('')
+  const [text, setText] = useState('')
+  const [showForm, setShowForm] = useState(false)
+
+  const { data: tickets = [] } = useQuery<SupportTicket[]>({
+    queryKey: ['support-tickets'],
+    queryFn: () => api.get('/api/support/tickets'),
   })
 
-  const supportUrl = oauthConfig?.support_telegram_url ?? null
-
-  const mutation = useMutation({
-    mutationFn: () => api.post('/api/support/message', { message: message.trim() }),
-    onSuccess: () => {
-      setSent(true)
-      setMessage('')
+  const createMutation = useMutation({
+    mutationFn: (payload: CreateTicketPayload) =>
+      api.post('/api/support/tickets', payload),
+    onSuccess: (ticket: any) => {
+      queryClient.invalidateQueries({ queryKey: ['support-tickets'] })
+      navigate(`/support/${ticket.id}`)
     },
   })
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!subject.trim() || !text.trim()) return
+    createMutation.mutate({ subject: subject.trim(), text: text.trim() })
+  }
+
   return (
-    <div className="p-4 md:p-6 max-w-xl mx-auto">
-      <h1 className="text-xl font-bold text-text-primary mb-1">Поддержка</h1>
-      <p className="text-sm text-text-muted mb-6">Мы поможем решить любую проблему</p>
+    <div className="max-w-xl mx-auto py-6 px-4">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-xl font-semibold text-text-primary">Поддержка</h1>
+        <button
+          onClick={() => setShowForm(v => !v)}
+          className="flex items-center gap-1.5 text-sm text-accent hover:text-accent/80 transition-colors"
+        >
+          <Plus size={16} />
+          Новое обращение
+        </button>
+      </div>
 
-      {/* Telegram */}
-      {supportUrl && (
-        <div className="rounded-card bg-surface border border-border-neutral p-4 mb-4 flex items-center gap-3">
-          <div className="h-10 w-10 rounded-full bg-[#229ED9]/15 flex items-center justify-center shrink-0">
-            <MessageCircle size={18} className="text-[#229ED9]" />
-          </div>
-          <div className="flex-1">
-            <p className="text-sm font-medium text-text-primary">Telegram</p>
-            <p className="text-xs text-text-muted">Быстрый ответ в рабочее время</p>
-          </div>
-          <a
-            href={supportUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-input bg-[#229ED9]/15 hover:bg-[#229ED9]/25 text-[#229ED9] px-3 py-1.5 text-sm font-medium transition-colors"
-          >
-            Написать
-          </a>
-        </div>
-      )}
-
-      {/* Contact form */}
-      <div className="rounded-card bg-surface border border-border-neutral p-5">
-        <h2 className="text-base font-semibold text-text-primary mb-4">Форма обращения</h2>
-
-        {sent ? (
-          <div className="py-6 text-center">
-            <div className="h-12 w-12 rounded-full bg-emerald-500/15 flex items-center justify-center mx-auto mb-3">
-              <Send size={20} className="text-emerald-400" />
-            </div>
-            <p className="text-sm text-text-primary font-medium mb-1">Сообщение отправлено</p>
-            <p className="text-xs text-text-muted">Ответим в ближайшее время</p>
-            <button
-              onClick={() => setSent(false)}
-              className="mt-4 text-xs text-accent hover:underline"
-            >
-              Отправить ещё
-            </button>
-          </div>
-        ) : (
-          <>
-            <div className="mb-3">
-              <label className="block text-xs text-text-muted mb-1">Имя</label>
+      {showForm && (
+        <form
+          onSubmit={handleSubmit}
+          className="rounded-card border border-border-neutral bg-surface p-4 mb-6"
+        >
+          <h2 className="text-sm font-semibold text-text-primary mb-4">Новое обращение</h2>
+          <div className="flex flex-col gap-3">
+            <div>
+              <label className="text-xs text-text-muted mb-1 block">Тема обращения</label>
               <input
-                value={user?.display_name ?? ''}
-                disabled
-                className="w-full rounded-input bg-white/5 border border-border-neutral px-3 py-2 text-sm text-text-secondary"
+                className="w-full rounded-input bg-background border border-border-neutral px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+                placeholder="Например: не работает подключение"
+                value={subject}
+                onChange={e => setSubject(e.target.value)}
+                maxLength={255}
               />
             </div>
-            <div className="mb-4">
-              <label className="block text-xs text-text-muted mb-1">Сообщение</label>
+            <div>
+              <label className="text-xs text-text-muted mb-1 block">Описание</label>
               <textarea
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                rows={5}
+                className="w-full rounded-input bg-background border border-border-neutral px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent resize-none"
+                placeholder="Подробно опиши что происходит..."
+                rows={4}
+                value={text}
+                onChange={e => setText(e.target.value)}
                 maxLength={2000}
-                placeholder="Опишите вашу проблему или вопрос…"
-                className="w-full rounded-input bg-white/5 border border-border-neutral px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60 resize-none"
               />
-              <p className="text-xs text-text-muted text-right mt-1">{message.length}/2000</p>
+              <div className="text-xs text-text-muted text-right mt-1">{text.length}/2000</div>
             </div>
-            {mutation.isError && (
-              <p className="mb-3 text-xs text-red-400">
-                {mutation.error instanceof ApiError ? mutation.error.detail : 'Ошибка отправки'}
-              </p>
-            )}
             <button
-              onClick={() => mutation.mutate()}
-              disabled={mutation.isPending || !message.trim()}
-              className="w-full rounded-input bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-medium py-2.5 text-sm transition-colors flex items-center justify-center gap-2"
+              type="submit"
+              disabled={!subject.trim() || !text.trim() || createMutation.isPending}
+              className="flex items-center justify-center gap-2 rounded-input bg-accent text-white py-2 text-sm font-medium disabled:opacity-50"
             >
-              {mutation.isPending ? (
-                <><Loader2 size={14} className="animate-spin" /> Отправка…</>
-              ) : (
-                <><Send size={14} /> Отправить</>
+              {createMutation.isPending ? 'Отправка...' : (
+                <>
+                  Отправить
+                  <MessageCircle size={15} />
+                </>
               )}
             </button>
-          </>
-        )}
-      </div>
+          </div>
+        </form>
+      )}
+
+      {tickets.length === 0 ? (
+        <div className="text-center py-12 text-text-muted text-sm">
+          Обращений пока нет
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {tickets.map(ticket => (
+            <button
+              key={ticket.id}
+              onClick={() => navigate(`/support/${ticket.id}`)}
+              className="rounded-card border border-border-neutral bg-surface p-4 flex items-center gap-3 hover:border-text-muted transition-colors text-left w-full"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs text-accent font-mono">#{ticket.number}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded ${
+                    ticket.status === 'open'
+                      ? 'bg-yellow-500/10 text-yellow-400'
+                      : 'bg-green-500/10 text-green-400'
+                  }`}>
+                    {ticket.status === 'open' ? 'Открыто' : 'Закрыто'}
+                  </span>
+                  {ticket.unread_count > 0 && (
+                    <span className="ml-auto text-xs bg-accent text-white px-1.5 py-0.5 rounded-full">
+                      {ticket.unread_count}
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-text-primary truncate">{ticket.subject}</p>
+                <p className="text-xs text-text-muted mt-0.5">{new Date(ticket.updated_at).toLocaleString('ru')}</p>
+              </div>
+              <ChevronRight size={16} className="text-text-muted flex-shrink-0" />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
