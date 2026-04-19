@@ -94,6 +94,8 @@ async def create_ticket(
         is_read_by_user=True,
         created_at=datetime.now(timezone.utc),
     )
+    user_display_name = current_user.display_name
+    user_email = _get_user_email(current_user)
     db.add(message)
     await db.commit()
     await db.refresh(ticket)
@@ -105,8 +107,8 @@ async def create_ticket(
             token=settings["token"],
             chat_id=settings["chat_id"],
             ticket_number=ticket.number,
-            user_display_name=current_user.display_name,
-            user_email=_get_user_email(current_user),
+            user_display_name=user_display_name,
+            user_email=user_email,
             subscription_status=None,
             text=body.text,
         )
@@ -181,6 +183,8 @@ async def add_message(
         raise HTTPException(status_code=400, detail="Обращение закрыто")
 
     ticket_number = ticket.number
+    user_display_name = current_user.display_name
+    user_email = _get_user_email(current_user)
     message = SupportMessage(
         id=uuid.uuid4(),
         ticket_id=ticket.id,
@@ -200,8 +204,8 @@ async def add_message(
             token=settings["token"],
             chat_id=settings["chat_id"],
             ticket_number=ticket_number,
-            user_display_name=current_user.display_name,
-            user_email=_get_user_email(current_user),
+            user_display_name=user_display_name,
+            user_email=user_email,
             subscription_status=None,
             text=body.text,
         )

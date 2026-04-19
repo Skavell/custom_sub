@@ -67,6 +67,7 @@ class SupportTicketOut(BaseModel):
 
 class SupportTicketDetailOut(SupportTicketOut):
     messages: list[SupportMessageOut] = []
+    user_id: uuid.UUID | None = None
 
 
 # --- Для админки ---

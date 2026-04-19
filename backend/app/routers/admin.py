@@ -750,6 +750,7 @@ async def admin_get_support_ticket(
         status=ticket.status,
         created_at=ticket.created_at,
         updated_at=ticket.updated_at,
+        user_id=ticket.user_id,
         messages=[SupportMessageOut(
             id=m.id, author_type=m.author_type, text=m.text, created_at=m.created_at
         ) for m in ticket.messages],
