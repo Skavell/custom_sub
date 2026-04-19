@@ -180,6 +180,7 @@ async def add_message(
     if ticket.status == "closed":
         raise HTTPException(status_code=400, detail="Обращение закрыто")
 
+    ticket_number = ticket.number
     message = SupportMessage(
         id=uuid.uuid4(),
         ticket_id=ticket.id,
@@ -198,7 +199,7 @@ async def add_message(
         tg_message_id = await send_admin_support_notification(
             token=settings["token"],
             chat_id=settings["chat_id"],
-            ticket_number=ticket.number,
+            ticket_number=ticket_number,
             user_display_name=current_user.display_name,
             user_email=_get_user_email(current_user),
             subscription_status=None,

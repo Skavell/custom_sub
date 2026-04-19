@@ -778,6 +778,7 @@ async def admin_reply_to_ticket(
     db.add(message)
     await db.commit()
     await db.refresh(message)
+    await db.refresh(ticket)
 
     await notify_user_on_reply(db=db, ticket=ticket, reply_text=body.text)
 
