@@ -3,6 +3,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings as app_config
 from app.models.auth_provider import AuthProvider, ProviderType
 from app.models.support_ticket import SupportTicket
 from app.services.setting_service import get_setting_decrypted
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 async def notify_user_on_reply(db: AsyncSession, ticket: SupportTicket, reply_text: str) -> None:
-    frontend_url = (await get_setting_decrypted(db, "frontend_url") or "").rstrip("/")
+    frontend_url = app_config.frontend_url.rstrip("/")
     ticket_url = f"{frontend_url}/support/{ticket.id}"
 
     tg_result = await db.execute(
