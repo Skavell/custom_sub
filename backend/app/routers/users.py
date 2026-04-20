@@ -70,13 +70,6 @@ async def delete_provider(
             detail=f"Invalid provider: {provider}. Must be one of: {[p.value for p in ProviderType]}",
         )
 
-    # Cannot unlink email provider
-    if provider_type == ProviderType.email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot unlink email provider",
-        )
-
     # Load all providers for user
     result = await db.execute(
         select(AuthProvider).where(AuthProvider.user_id == current_user.id)
@@ -92,8 +85,7 @@ async def delete_provider(
             detail=f"Provider {provider} is not linked to this account",
         )
 
-    # Guard after confirming target exists: email is blocked above, so reaching
-    # here with len==1 means the sole non-email provider would be removed.
+    # Prevent removing the last remaining provider (regardless of type).
     if len(all_providers) == 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
