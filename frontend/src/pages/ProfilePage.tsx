@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query'
 import { User, Trash2, Clock, Loader2, CheckCircle, XCircle, AlertCircle, Plus, Pencil, Check, X, KeyRound, LogOut } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import EmailVerificationBanner from '@/components/EmailVerificationBanner'
 import { useTransactions } from '@/hooks/useTransactions'
 import { api, ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -171,6 +172,12 @@ export default function ProfilePage() {
     staleTime: 5 * 60_000,
   })
 
+  const showVerifyBanner =
+    user?.email_verified === false &&
+    oauthConfig?.email_verification_required === true
+
+  const emailProvider = user?.providers.find((p) => p.type === 'email')
+
   const [isEditingName, setIsEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
@@ -249,6 +256,10 @@ export default function ProfilePage() {
   return (
     <div className="p-4 md:p-6 max-w-xl mx-auto">
       <h1 className="text-xl font-bold text-text-primary mb-5">Профиль</h1>
+
+      {showVerifyBanner && emailProvider?.identifier && (
+        <EmailVerificationBanner userEmail={emailProvider.identifier} />
+      )}
 
       {/* Account info */}
       <div className="rounded-card bg-surface border border-border-neutral p-5 mb-4">
