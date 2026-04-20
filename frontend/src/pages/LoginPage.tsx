@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, ApiError } from '@/lib/api'
+import { isTelegramBrowser } from '@/lib/utils'
 import type { OAuthConfigResponse } from '@/types/api'
 
 function loginWithGoogle(clientId: string) {
@@ -58,7 +59,7 @@ export default function LoginPage() {
   const showTelegramOIDC = oauthConfig?.telegram_oidc && !!oauthConfig.telegram_oidc_client_id
   const hasOAuth = showGoogle || showVK || showTelegramOIDC
 
-  const isTelegramWebView = /Telegram/i.test(navigator.userAgent)
+  const isTelegramWebView = isTelegramBrowser()
 
   const handleTelegramOIDCLogin = () => {
     if (!oauthConfig?.telegram_oidc_client_id) return;

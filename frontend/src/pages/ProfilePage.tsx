@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth'
 import EmailVerificationBanner from '@/components/EmailVerificationBanner'
 import { useTransactions } from '@/hooks/useTransactions'
 import { api, ApiError } from '@/lib/api'
-import { cn } from '@/lib/utils'
+import { cn, isTelegramBrowser } from '@/lib/utils'
 import type { OAuthConfigResponse } from '@/types/api'
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -518,12 +518,12 @@ export default function ProfilePage() {
               <>
                 <button
                   onClick={() => startTelegramOIDCLink(oauthConfig.telegram_oidc_client_id!)}
-                  disabled={/Telegram/i.test(navigator.userAgent)}
+                  disabled={isTelegramBrowser()}
                   className="flex items-center gap-2.5 rounded-input bg-white/5 px-3 py-2.5 text-sm text-text-secondary hover:text-text-primary transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Telegram
                 </button>
-                {/Telegram/i.test(navigator.userAgent) && (
+                {isTelegramBrowser() && (
                   <p className="text-xs text-text-secondary">
                     Откройте страницу во внешнем браузере для привязки Telegram
                   </p>
