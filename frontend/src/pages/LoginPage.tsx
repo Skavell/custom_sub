@@ -58,6 +58,8 @@ export default function LoginPage() {
   const showTelegramOIDC = oauthConfig?.telegram_oidc && !!oauthConfig.telegram_oidc_client_id
   const hasOAuth = showGoogle || showVK || showTelegramOIDC
 
+  const isTelegramWebView = /Telegram/i.test(navigator.userAgent)
+
   const handleTelegramOIDCLogin = () => {
     if (!oauthConfig?.telegram_oidc_client_id) return;
     const redirectUri = encodeURIComponent(`${window.location.origin}/auth/telegram/callback`);
@@ -139,16 +141,24 @@ export default function LoginPage() {
               </button>
             )}
             {showTelegramOIDC && (
-              <button
-                type="button"
-                onClick={handleTelegramOIDCLogin}
-                className="w-full flex items-center justify-center gap-3 py-2 rounded-input border border-border-neutral bg-background text-sm text-text-primary hover:border-border-accent transition-colors"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path fill="#2AABEE" d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.32 13.617l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.828.942z"/>
-                </svg>
-                Войти через Telegram
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleTelegramOIDCLogin}
+                  disabled={isTelegramWebView}
+                  className="w-full flex items-center justify-center gap-3 py-2 rounded-input border border-border-neutral bg-background text-sm text-text-primary hover:border-border-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path fill="#2AABEE" d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.32 13.617l-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.828.942z"/>
+                  </svg>
+                  Войти через Telegram
+                </button>
+                {isTelegramWebView && (
+                  <p className="text-xs text-text-secondary text-center">
+                    Откройте страницу во внешнем браузере для входа через Telegram
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}
