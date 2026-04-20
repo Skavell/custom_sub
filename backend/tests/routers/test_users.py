@@ -190,14 +190,42 @@ async def test_delete_last_provider_forbidden():
 
 
 @pytest.mark.asyncio
-async def test_delete_email_provider_forbidden():
-    """Cannot remove email provider even when other providers exist."""
+async def test_delete_email_provider_success():
+    """Delete email provider when user also has google — should succeed with 204."""
     user_id = uuid.uuid4()
     user = _make_user(user_id=user_id)
 
-    email_provider = _make_provider(user_id, ProviderType.email, "user@example.com")
+    email_provider = _make_provider(user_id, ProviderType.email, provider_user_id="user@example.com")
     google_provider = _make_provider(user_id, ProviderType.google, "user_google")
     providers = [email_provider, google_provider]
+
+    db = _make_db_with_providers(providers)
+    db.delete = AsyncMock()
+    db.commit = AsyncMock()
+
+    app.dependency_overrides[get_current_user] = _override_get_current_user(user)
+    app.dependency_overrides[get_db] = _override_get_db(db)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.delete("/api/users/me/providers/email")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 204
+    db.delete.assert_awaited_once_with(email_provider)
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_last_email_provider_forbidden():
+    """Cannot remove email provider when it is the only provider."""
+    user_id = uuid.uuid4()
+    user = _make_user(user_id=user_id)
+
+    email_provider = _make_provider(user_id, ProviderType.email, provider_user_id="user@example.com")
+    providers = [email_provider]
 
     db = _make_db_with_providers(providers)
 
