@@ -1,6 +1,7 @@
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { Home, CreditCard, Download, BookOpen, MessageCircle, User } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 import { api } from '@/lib/api'
@@ -44,6 +45,12 @@ function NavItem({ to, label, icon: Icon, exact, supportUnread }: NavItemProps) 
 
 export default function Layout() {
   const { user } = useAuth()
+  const location = useLocation()
+  const mainRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    mainRef.current?.scrollTo(0, 0)
+  }, [location.pathname])
 
   const { data: supportTickets = [] } = useQuery<Array<{ unread_count: number }>>({
     queryKey: ['support-tickets'],
@@ -80,7 +87,7 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto pb-20 md:pb-0">
+      <main ref={mainRef} className="flex-1 overflow-auto pb-20 md:pb-0">
         <Outlet />
       </main>
 
