@@ -24,6 +24,7 @@ def _make_admin():
     u.display_name = "Admin"
     u.is_admin = True
     u.remnawave_uuid = None
+    u.remnawave_user_id = None
     u.has_made_payment = False
     u.subscription_conflict = False
     u.avatar_url = None
@@ -42,6 +43,7 @@ def _make_regular_user():
     u.avatar_url = None
     u.is_admin = False
     u.remnawave_uuid = uuid.uuid4()
+    u.remnawave_user_id = 12345
     u.has_made_payment = True
     u.subscription_conflict = False
     u.created_at = NOW
@@ -212,10 +214,11 @@ async def test_admin_user_detail_returns_full_info():
 # --- POST /api/admin/users/{user_id}/sync ---
 
 @pytest.mark.asyncio
-async def test_admin_user_sync_no_rw_uuid_returns_409():
+async def test_admin_user_sync_no_rw_id_returns_409():
     admin = _make_admin()
     user = _make_regular_user()
     user.remnawave_uuid = None
+    user.remnawave_user_id = None
     db = AsyncMock(spec=AsyncSession)
     result_mock = MagicMock()
     result_mock.scalar_one_or_none.return_value = user
@@ -298,7 +301,7 @@ async def test_admin_resolve_conflict_user_not_found_returns_404():
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.post(
                 f"/api/admin/users/{uuid.uuid4()}/resolve-conflict",
-                json={"remnawave_uuid": str(uuid.uuid4())},
+                json={"remnawave_user_id": 12345},
             )
     finally:
         app.dependency_overrides.clear()
@@ -313,10 +316,12 @@ async def test_admin_resolve_conflict_success_clears_flag():
     db = AsyncMock(spec=AsyncSession)
     result_mock = MagicMock()
     result_mock.scalar_one_or_none.return_value = user
-    db.execute = AsyncMock(return_value=result_mock)
+    conflict_result = MagicMock()
+    conflict_result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(side_effect=[result_mock, conflict_result])
     db.commit = AsyncMock()
 
-    new_rw_uuid = str(uuid.uuid4())
+    new_rw_id = 12345
     app.dependency_overrides[require_admin] = _override_admin(admin)
     app.dependency_overrides[get_db] = _override_db(db)
 
@@ -329,7 +334,7 @@ async def test_admin_resolve_conflict_success_clears_flag():
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
                 resp = await c.post(
                     f"/api/admin/users/{user.id}/resolve-conflict",
-                    json={"remnawave_uuid": new_rw_uuid},
+                    json={"remnawave_user_id": new_rw_id},
                 )
         finally:
             app.dependency_overrides.clear()
@@ -337,6 +342,7 @@ async def test_admin_resolve_conflict_success_clears_flag():
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
     assert user.subscription_conflict is False
+    assert user.remnawave_user_id == new_rw_id
     db.commit.assert_called()
 
 

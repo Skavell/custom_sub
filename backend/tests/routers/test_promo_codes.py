@@ -21,6 +21,7 @@ def _make_user(remnawave_uuid=None):
     u = MagicMock(spec=User)
     u.id = uuid.uuid4()
     u.remnawave_uuid = remnawave_uuid if remnawave_uuid is not None else uuid.uuid4()
+    u.remnawave_user_id = 12345
     return u
 
 
@@ -113,6 +114,7 @@ async def test_validate_already_used_code_returns_200_with_flag():
 async def test_apply_no_trial_returns_409():
     user = _make_user()
     user.remnawave_uuid = None
+    user.remnawave_user_id = None
     app.dependency_overrides[get_current_user] = _override_user(user)
     app.dependency_overrides[get_db] = _override_db(AsyncMock(spec=AsyncSession))
     try:

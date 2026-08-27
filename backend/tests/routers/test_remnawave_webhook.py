@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import json
-import uuid
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -21,12 +20,11 @@ def _make_sig(secret: str, body: bytes) -> str:
     return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
 
-def _make_body(event: str = "user.first_connected", remnawave_uuid: str | None = None) -> bytes:
-    rw_uuid = remnawave_uuid or str(uuid.uuid4())
+def _make_body(event: str = "user.first_connected", remnawave_user_id: int = 12345) -> bytes:
     return json.dumps({
         "event": event,
         "data": {
-            "uuid": rw_uuid,
+            "id": remnawave_user_id,
             "userTraffic": {
                 "usedTrafficBytes": 1024,
                 "lifetimeUsedTrafficBytes": 1024,
@@ -89,7 +87,7 @@ async def test_webhook_invalid_signature_returns_401():
 @pytest.mark.asyncio
 async def test_webhook_unknown_event_returns_200():
     """Returns 200 for unknown events without touching DB."""
-    body = json.dumps({"event": "user.expired", "data": {"uuid": str(uuid.uuid4())}},
+    body = json.dumps({"event": "user.expired", "data": {"id": 12345}},
                       separators=(",", ":")).encode()
     sig = _make_sig(SECRET, body)
     db = AsyncMock(spec=AsyncSession)
@@ -112,7 +110,7 @@ async def test_webhook_unknown_event_returns_200():
 
 @pytest.mark.asyncio
 async def test_webhook_first_connected_user_not_found_returns_200():
-    """Returns 200 and does not crash when no user matches remnawave_uuid."""
+    """Returns 200 and does not crash when no user matches Remnawave id."""
     body = _make_body()
     sig = _make_sig(SECRET, body)
     db = AsyncMock(spec=AsyncSession)
@@ -137,8 +135,7 @@ async def test_webhook_first_connected_user_not_found_returns_200():
 @pytest.mark.asyncio
 async def test_webhook_first_connected_writes_timestamp():
     """Writes first_connected_at from userTraffic.firstConnectedAt when user found."""
-    rw_uuid = uuid.uuid4()
-    body = _make_body(remnawave_uuid=str(rw_uuid))
+    body = _make_body(remnawave_user_id=12345)
     sig = _make_sig(SECRET, body)
 
     user = MagicMock(spec=User)
@@ -168,8 +165,7 @@ async def test_webhook_first_connected_writes_timestamp():
 @pytest.mark.asyncio
 async def test_webhook_first_connected_skips_if_already_set():
     """Does not overwrite first_connected_at if already set."""
-    rw_uuid = uuid.uuid4()
-    body = _make_body(remnawave_uuid=str(rw_uuid))
+    body = _make_body(remnawave_user_id=12345)
     sig = _make_sig(SECRET, body)
 
     existing_ts = datetime(2026, 4, 18, 8, 0, 0, tzinfo=timezone.utc)
@@ -199,11 +195,10 @@ async def test_webhook_first_connected_skips_if_already_set():
 @pytest.mark.asyncio
 async def test_webhook_null_first_connected_at_skips_write():
     """Does not write first_connected_at when userTraffic.firstConnectedAt is null."""
-    rw_uuid = uuid.uuid4()
     body = json.dumps({
         "event": "user.first_connected",
         "data": {
-            "uuid": str(rw_uuid),
+            "id": 12345,
             "userTraffic": {
                 "usedTrafficBytes": 0,
                 "lifetimeUsedTrafficBytes": 0,

@@ -32,6 +32,7 @@ def _make_target_user(is_banned=False, is_admin=False):
     user.display_name = "Test User"
     user.avatar_url = None
     user.remnawave_uuid = None
+    user.remnawave_user_id = None
     user.has_made_payment = False
     user.subscription_conflict = False
     from datetime import datetime, timezone
@@ -64,7 +65,7 @@ async def test_ban_user_toggles_is_banned():
         avatar_url=None,
         is_admin=False,
         is_banned=True,
-        remnawave_uuid=None,
+        remnawave_user_id=None,
         has_made_payment=False,
         subscription_conflict=False,
         created_at=now,
@@ -105,11 +106,12 @@ async def test_ban_self_returns_403():
 
 
 @pytest.mark.asyncio
-async def test_reset_subscription_deletes_sub_and_clears_uuid():
-    """POST /reset-subscription deletes the subscription and clears remnawave_uuid."""
+async def test_reset_subscription_deletes_sub_and_clears_remnawave_ids():
+    """POST /reset-subscription deletes the subscription and clears both references."""
     admin = _make_admin()
     target = _make_target_user()
     target.remnawave_uuid = "some-uuid"
+    target.remnawave_user_id = 12345
     sub = MagicMock(spec=Subscription)
     sub.status = SubscriptionStatus.active
 
@@ -140,5 +142,6 @@ async def test_reset_subscription_deletes_sub_and_clears_uuid():
         assert resp.json()["ok"] is True
         db.delete.assert_called_once_with(sub)
         assert target.remnawave_uuid is None
+        assert target.remnawave_user_id is None
     finally:
         app.dependency_overrides.clear()

@@ -21,6 +21,7 @@ def _make_user(remnawave_uuid=None) -> User:
     user = MagicMock(spec=User)
     user.id = uuid.uuid4()
     user.remnawave_uuid = uuid.UUID(str(remnawave_uuid)) if remnawave_uuid else None
+    user.remnawave_user_id = None
     user.has_made_payment = False
     user.first_connected_at = None
     return user
@@ -286,6 +287,7 @@ async def test_get_me_fetches_remnawave_traffic_from_cache():
     from datetime import timedelta
     rw_uuid = uuid.uuid4()
     user = _make_user(remnawave_uuid=rw_uuid)
+    user.remnawave_user_id = 12345
     user.first_connected_at = NOW
 
     sub = MagicMock(spec=Subscription)

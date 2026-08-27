@@ -22,6 +22,7 @@ def _make_user(remnawave_uuid=None) -> User:
     u = MagicMock(spec=User)
     u.id = uuid.uuid4()
     u.remnawave_uuid = remnawave_uuid
+    u.remnawave_user_id = 12345 if remnawave_uuid is not None else None
     u.has_made_payment = False
     return u
 
