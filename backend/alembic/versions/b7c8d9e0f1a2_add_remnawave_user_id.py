@@ -1,7 +1,7 @@
 """add numeric Remnawave v3 user id
 
 Revision ID: b7c8d9e0f1a2
-Revises: a2b3c4d5e6f7
+Revises: 4e95ce49b31d
 """
 from typing import Sequence, Union
 
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "b7c8d9e0f1a2"
-down_revision: Union[str, Sequence[str], None] = "a2b3c4d5e6f7"
+down_revision: Union[str, Sequence[str], None] = "4e95ce49b31d"
 branch_labels = None
 depends_on = None
 
