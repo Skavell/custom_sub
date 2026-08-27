@@ -89,7 +89,9 @@ async def get_subscription_link(
 
     rw_client = RemnawaveClient(url, token)
     try:
-        rw_user = await rw_client.get_user(str(current_user.remnawave_uuid))
+        if current_user.remnawave_user_id is None:
+            raise ValueError("User has no Remnawave v3 id")
+        rw_user = await rw_client.get_user(current_user.remnawave_user_id)
     except Exception as exc:
         logger.exception("Failed to fetch subscription URL from Remnawave: %s", exc)
         raise HTTPException(

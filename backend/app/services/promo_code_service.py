@@ -86,11 +86,13 @@ async def apply_bonus_days(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Промокод уже использован")
 
     # Extend Remnawave subscription
-    rw_user = await rw_client.get_user(str(user.remnawave_uuid))
+    if user.remnawave_user_id is None:
+        raise ValueError("User has no Remnawave v3 id")
+    rw_user = await rw_client.get_user(user.remnawave_user_id)
     base_date = max(rw_user.expire_at, now)
     new_expire_at = base_date + timedelta(days=promo_locked.value)
     rw_user = await rw_client.update_user(
-        str(user.remnawave_uuid),
+        user.remnawave_user_id,
         traffic_limit_bytes=0,  # unlimited — always paid after bonus
         expire_at=new_expire_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
     )

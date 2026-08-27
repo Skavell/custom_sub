@@ -61,7 +61,7 @@ async def get_my_subscription(
     has_connected = current_user.first_connected_at is not None
     traffic_used_bytes: int | None = None
 
-    if current_user.remnawave_uuid is not None:
+    if current_user.remnawave_user_id is not None:
         cache_key = f"rw:user_data:{current_user.id}"
         cached_raw = await redis.get(cache_key)
 
@@ -74,7 +74,7 @@ async def get_my_subscription(
             if remnawave_url and remnawave_token:
                 try:
                     rw_user = await RemnawaveClient(remnawave_url, remnawave_token).get_user(
-                        str(current_user.remnawave_uuid)
+                        current_user.remnawave_user_id
                     )
                     rw_data = {
                         "used_traffic_bytes": rw_user.used_traffic_bytes,
@@ -107,7 +107,7 @@ async def activate_trial(
     redis: Redis = Depends(get_redis),
 ) -> TrialActivateResponse:
     # Guard 1: already activated
-    if current_user.remnawave_uuid is not None:
+    if current_user.remnawave_user_id is not None or current_user.remnawave_uuid is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Пробный период уже был активирован",
@@ -217,9 +217,8 @@ async def activate_trial(
                 detail="Ошибка подключения к серверу туннелей. Попробуйте позже.",
             )
 
-    # Persist remnawave_uuid on user
-    import uuid as _uuid
-    current_user.remnawave_uuid = _uuid.UUID(rw_user.id)
+    # Persist the Remnawave v3 numeric id. UUID remains legacy audit data only.
+    current_user.remnawave_user_id = rw_user.id
     await db.commit()
 
     # Create local subscription

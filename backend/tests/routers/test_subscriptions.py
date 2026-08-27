@@ -327,6 +327,7 @@ async def test_get_me_writes_first_connected_from_remnawave_fallback():
 
     rw_uuid = uuid.uuid4()
     user = _make_user(remnawave_uuid=rw_uuid)
+    user.remnawave_user_id = 12345
     user.first_connected_at = None
 
     sub = MagicMock(spec=Subscription)
@@ -337,7 +338,8 @@ async def test_get_me_writes_first_connected_from_remnawave_fallback():
     sub.traffic_limit_gb = 30
 
     rw_user = RemnawaveUser(
-        id=str(rw_uuid),
+        id=12345,
+        short_uuid="abc123",
         username="ws_test",
         expire_at=NOW,
         traffic_limit_bytes=30 * 1024 ** 3,
@@ -380,6 +382,7 @@ async def test_get_me_remnawave_unreachable_still_returns_200():
     from datetime import timedelta
     rw_uuid = uuid.uuid4()
     user = _make_user(remnawave_uuid=rw_uuid)
+    user.remnawave_user_id = 12345
     user.first_connected_at = None
 
     sub = MagicMock(spec=Subscription)

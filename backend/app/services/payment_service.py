@@ -101,11 +101,13 @@ async def complete_payment(
     now = datetime.now(tz=timezone.utc)
 
     # Extend Remnawave subscription
-    rw_user = await rw_client.get_user(str(user.remnawave_uuid))
+    if user.remnawave_user_id is None:
+        raise ValueError("User has no Remnawave v3 id")
+    rw_user = await rw_client.get_user(user.remnawave_user_id)
     base_date = max(rw_user.expire_at, now)
     new_expire_at = base_date + timedelta(days=plan.duration_days)
     rw_user = await rw_client.update_user(
-        str(user.remnawave_uuid),
+        user.remnawave_user_id,
         traffic_limit_bytes=0,  # unlimited — all paid plans
         expire_at=new_expire_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         internal_squad_uuids=paid_internal_squad_uuids,

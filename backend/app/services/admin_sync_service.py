@@ -38,7 +38,7 @@ async def run_sync_all(task_id: str, redis: Redis) -> None:
             )
             return
 
-        result = await db.execute(select(User).where(User.remnawave_uuid.is_not(None)))
+        result = await db.execute(select(User).where(User.remnawave_user_id.is_not(None)))
         users = result.scalars().all()
         total = len(users)
         done = 0
@@ -65,11 +65,11 @@ async def run_sync_all(task_id: str, redis: Redis) -> None:
 
             try:
                 async with asyncio.timeout(_PER_USER_TIMEOUT):
-                    rw_user = await rw_client.get_user(str(user.remnawave_uuid))
+                    rw_user = await rw_client.get_user(user.remnawave_user_id)
                     await sync_subscription_from_remnawave(db, user, rw_user)
                 done += 1
             except Exception as exc:
-                logger.warning("Sync failed for user %s: %s", user.remnawave_uuid, exc)
+                logger.warning("Sync failed for Remnawave user %s: %s", user.remnawave_user_id, exc)
                 errors += 1
 
             await redis.set(

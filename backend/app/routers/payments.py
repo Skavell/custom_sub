@@ -87,7 +87,7 @@ async def create_payment(
     redis: Redis = Depends(get_redis),
 ) -> PaymentResponse:
     # Guard 1: trial not activated
-    if current_user.remnawave_uuid is None:
+    if current_user.remnawave_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Сначала активируйте пробный период",

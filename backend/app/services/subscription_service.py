@@ -38,7 +38,7 @@ async def create_trial_subscription(
     trial_traffic_bytes: int,
 ) -> Subscription:
     """Create a trial Subscription row and a trial_activation Transaction.
-    Caller is responsible for setting user.remnawave_uuid before calling this.
+    Caller is responsible for setting user.remnawave_user_id before calling this.
     """
     now = datetime.now(tz=timezone.utc)
     expires_at = now + timedelta(days=trial_days)
@@ -129,8 +129,8 @@ async def sync_remnawave_by_telegram_id(
     """Sync/merge subscriptions when a Telegram account is linked or used for login.
 
     Scenarios:
-    - No existing remnawave_uuid → link TG subscription if found, done.
-    - Has remnawave_uuid, no TG user in Remnawave → set telegramId on site user.
+    - No existing remnawave_user_id → link TG subscription if found, done.
+    - Has remnawave_user_id, no TG user in Remnawave → set telegramId on site user.
     - Both exist and they are the same Remnawave user → nothing to do.
     - Site = trial, TG = any → replace site subscription with TG, delete site Remnawave user.
     - Site = paid, TG = trial → keep site subscription, just set telegramId.
@@ -151,16 +151,16 @@ async def sync_remnawave_by_telegram_id(
         tg_rw_user = await rw_client.get_user_by_telegram_id(telegram_id)
 
         # ── Case 1: user has no site subscription yet ──────────────────────────
-        if user.remnawave_uuid is None:
+        if user.remnawave_user_id is None:
             if tg_rw_user is None:
                 return TelegramLinkResult(action="no_tg_user")
-            user.remnawave_uuid = uuid.UUID(tg_rw_user.id)
+            user.remnawave_user_id = tg_rw_user.id
             await db.commit()
             await sync_subscription_from_remnawave(db, user, tg_rw_user)
             return TelegramLinkResult(action="first_link")
 
         # ── Case 2: user already has a site subscription ───────────────────────
-        site_rw_user = await rw_client.get_user(str(user.remnawave_uuid))
+        site_rw_user = await rw_client.get_user(user.remnawave_user_id)
 
         # Same Remnawave user — nothing to do
         if tg_rw_user is not None and tg_rw_user.id == site_rw_user.id:
@@ -169,7 +169,7 @@ async def sync_remnawave_by_telegram_id(
         if tg_rw_user is None:
             # No TG user in Remnawave → stamp telegramId (and username as description) on the site user
             await rw_client.update_user(
-                str(user.remnawave_uuid),
+                user.remnawave_user_id,
                 telegram_id=telegram_id,
                 description=telegram_username or None,
             )
@@ -181,14 +181,14 @@ async def sync_remnawave_by_telegram_id(
 
         if site_is_trial:
             # ── Site = trial → always replace with TG subscription ────────────
-            old_site_uuid = str(user.remnawave_uuid)
-            user.remnawave_uuid = uuid.UUID(tg_rw_user.id)
+            old_site_id = user.remnawave_user_id
+            user.remnawave_user_id = tg_rw_user.id
             await db.commit()
             await sync_subscription_from_remnawave(db, user, tg_rw_user)
             try:
-                await rw_client.delete_user(old_site_uuid)
+                await rw_client.delete_user(old_site_id)
             except Exception as exc:
-                logger.warning("Could not delete site trial user %s from Remnawave: %s", old_site_uuid, exc)
+                logger.warning("Could not delete site trial user %s from Remnawave: %s", old_site_id, exc)
             return TelegramLinkResult(
                 action="replaced_trial",
                 notification=(
@@ -209,14 +209,14 @@ async def sync_remnawave_by_telegram_id(
                 tg_rw_user.id,
                 expire_at=new_expire_at.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
             )
-            old_site_uuid = str(user.remnawave_uuid)
-            user.remnawave_uuid = uuid.UUID(tg_rw_user.id)
+            old_site_id = user.remnawave_user_id
+            user.remnawave_user_id = tg_rw_user.id
             await db.commit()
             await sync_subscription_from_remnawave(db, user, updated_tg_user)
             try:
-                await rw_client.delete_user(old_site_uuid)
+                await rw_client.delete_user(old_site_id)
             except Exception as exc:
-                logger.warning("Could not delete site paid user %s from Remnawave: %s", old_site_uuid, exc)
+                logger.warning("Could not delete site paid user %s from Remnawave: %s", old_site_id, exc)
             return TelegramLinkResult(
                 action="merged_paid",
                 notification=(
@@ -230,7 +230,7 @@ async def sync_remnawave_by_telegram_id(
         else:
             # ── Site = paid, TG = trial → keep site, stamp telegramId, delete TG trial ──
             await rw_client.update_user(
-                str(user.remnawave_uuid),
+                user.remnawave_user_id,
                 telegram_id=telegram_id,
                 description=telegram_username or None,
             )

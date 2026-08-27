@@ -43,7 +43,7 @@ class UserAdminListItem(BaseModel):
     avatar_url: str | None
     is_admin: bool
     is_banned: bool = False
-    remnawave_uuid: uuid.UUID | None
+    remnawave_user_id: int | None
     has_made_payment: bool
     subscription_conflict: bool
     created_at: datetime
@@ -62,7 +62,7 @@ class UserAdminDetail(BaseModel):
     avatar_url: str | None
     is_admin: bool
     is_banned: bool = False
-    remnawave_uuid: uuid.UUID | None
+    remnawave_user_id: int | None
     has_made_payment: bool
     subscription_conflict: bool
     created_at: datetime
@@ -75,11 +75,35 @@ class UserAdminDetail(BaseModel):
 
 
 class ConflictResolveRequest(BaseModel):
-    remnawave_uuid: str  # UUID string of the Remnawave user to keep
+    remnawave_user_id: int
 
 
-class SetRemnawaveUuidRequest(BaseModel):
-    remnawave_uuid: str  # UUID string of the Remnawave user to assign
+class SetRemnawaveUserIdRequest(BaseModel):
+    remnawave_user_id: int
+
+
+class RemnawaveV3ReconcileRequest(BaseModel):
+    apply: bool = False
+    limit: int = 500
+
+
+class RemnawaveV3ReconcileItem(BaseModel):
+    user_id: uuid.UUID
+    status: str  # matched | ambiguous | missing | conflict | error
+    remnawave_user_id: int | None = None
+    methods: list[str] = []
+
+
+class RemnawaveV3ReconcileResponse(BaseModel):
+    dry_run: bool
+    processed: int
+    matched: int
+    applied: int
+    ambiguous: int
+    missing: int
+    conflicts: int
+    errors: int
+    items: list[RemnawaveV3ReconcileItem]
 
 
 class SyncStatusResponse(BaseModel):

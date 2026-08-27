@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -7,90 +8,105 @@ from typing import Any
 import httpx
 
 logger = logging.getLogger(__name__)
-
 _TIMEOUT = httpx.Timeout(10.0)
 
 
 @dataclass
 class RemnawaveUser:
-    id: str
+    id: int
+    short_uuid: str
     username: str
     expire_at: datetime
-    traffic_limit_bytes: int  # 0 = unlimited
-    status: str               # "ACTIVE" | "DISABLED"
+    traffic_limit_bytes: int
+    status: str
     subscription_url: str
     telegram_id: int | None
     used_traffic_bytes: int
     first_connected_at: datetime | None
 
 
+def _response_object(data: dict[str, Any]) -> dict[str, Any]:
+    response = data.get("response")
+    return response if isinstance(response, dict) else data
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+
 def _parse_user(data: dict[str, Any]) -> RemnawaveUser:
-    if "response" in data:
-        data = data["response"]
-    user_traffic = data.get("userTraffic") or {}
-    fca_str = user_traffic.get("firstConnectedAt")
-    first_connected_at = (
-        datetime.fromisoformat(fca_str.replace("Z", "+00:00")) if fca_str else None
-    )
+    data = _response_object(data)
+    traffic = data.get("userTraffic") or {}
+    used_traffic = traffic.get("usedTrafficBytes", data.get("usedTrafficBytes", 0)) or 0
+    first_connected = traffic.get("firstConnectedAt", data.get("firstConnectedAt"))
+    expire_at = _parse_datetime(data["expireAt"])
+    if expire_at is None:
+        raise ValueError("Remnawave user response is missing expireAt")
     return RemnawaveUser(
-        id=data["uuid"],
+        id=int(data["id"]),
+        short_uuid=data.get("shortUuid", ""),
         username=data["username"],
-        expire_at=datetime.fromisoformat(data["expireAt"].replace("Z", "+00:00")),
+        expire_at=expire_at,
         traffic_limit_bytes=data.get("trafficLimitBytes") or 0,
         status=data.get("status", "ACTIVE"),
         subscription_url=data.get("subscriptionUrl", ""),
         telegram_id=data.get("telegramId"),
-        used_traffic_bytes=user_traffic.get("usedTrafficBytes") or 0,
-        first_connected_at=first_connected_at,
+        used_traffic_bytes=used_traffic,
+        first_connected_at=_parse_datetime(first_connected),
     )
 
 
 class RemnawaveClient:
+    """Client for the Remnawave v3 user API, where users have numeric ids."""
+
     def __init__(self, base_url: str, token: str) -> None:
         self._base = base_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
-    async def get_user(self, remnawave_uuid: str) -> RemnawaveUser:
+    async def get_user(self, remnawave_user_id: int) -> RemnawaveUser:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
-            resp = await http.get(
-                f"{self._base}/users/{remnawave_uuid}", headers=self._headers
-            )
-            resp.raise_for_status()
-            return _parse_user(resp.json())
+            response = await http.get(f"{self._base}/users/{remnawave_user_id}", headers=self._headers)
+            response.raise_for_status()
+            return _parse_user(response.json())
+
+    async def get_user_by_username(self, username: str) -> RemnawaveUser | None:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
+            response = await http.get(f"{self._base}/users/by-username/{username}", headers=self._headers)
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return _parse_user(response.json())
+
+    async def get_user_by_short_uuid(self, short_uuid: str) -> RemnawaveUser | None:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
+            response = await http.get(f"{self._base}/users/by-short-uuid/{short_uuid}", headers=self._headers)
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return _parse_user(response.json())
 
     async def get_user_by_telegram_id(self, telegram_id: int) -> RemnawaveUser | None:
+        """v3 replacement for the removed /users/by-telegram-id endpoint."""
         async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
-            resp = await http.get(
-                f"{self._base}/users/by-telegram-id/{telegram_id}",
-                headers=self._headers,
+            response = await http.get(
+                f"{self._base}/users/stream", headers=self._headers,
+                params={"telegramId": telegram_id, "size": 1000},
             )
-            if resp.status_code == 404:
+            response.raise_for_status()
+            raw_payload = response.json()
+            payload = _response_object(raw_payload)
+            users = raw_payload.get("response") if isinstance(raw_payload.get("response"), list) else payload.get("items", payload.get("users", []))
+            if not users:
                 return None
-            resp.raise_for_status()
-            data = resp.json()
-            # API returns {"response": [...]} — array, not single object
-            if "response" in data:
-                items = data["response"]
-                if not items:
-                    return None
-                return _parse_user(items[0])
-            return _parse_user(data)
+            if len(users) > 1:
+                logger.warning("Multiple Remnawave users found for Telegram id %s", telegram_id)
+            return _parse_user(users[0])
 
-    async def create_user(
-        self,
-        username: str,
-        traffic_limit_bytes: int,
-        expire_at: str,
-        internal_squad_uuids: list[str] | None = None,
-        external_squad_uuid: str | None = None,
-        telegram_id: int | None = None,
-        description: str | None = None,
-    ) -> RemnawaveUser:
-        payload: dict[str, Any] = {
-            "username": username,
-            "trafficLimitBytes": traffic_limit_bytes,
-            "expireAt": expire_at,
-        }
+    async def create_user(self, username: str, traffic_limit_bytes: int, expire_at: str,
+                          internal_squad_uuids: list[str] | None = None,
+                          external_squad_uuid: str | None = None, telegram_id: int | None = None,
+                          description: str | None = None) -> RemnawaveUser:
+        payload: dict[str, Any] = {"username": username, "trafficLimitBytes": traffic_limit_bytes, "expireAt": expire_at}
         if internal_squad_uuids:
             payload["activeInternalSquads"] = internal_squad_uuids
         if external_squad_uuid:
@@ -100,22 +116,15 @@ class RemnawaveClient:
         if description:
             payload["description"] = description
         async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
-            resp = await http.post(f"{self._base}/users", headers=self._headers, json=payload)
-            logger.error("Remnawave create_user status=%s body=%s", resp.status_code, resp.text)
-            resp.raise_for_status()
-            return _parse_user(resp.json())
+            response = await http.post(f"{self._base}/users", headers=self._headers, json=payload)
+            response.raise_for_status()
+            return _parse_user(response.json())
 
-    async def update_user(
-        self,
-        remnawave_uuid: str,
-        traffic_limit_bytes: int | None = None,
-        expire_at: str | None = None,
-        internal_squad_uuids: list[str] | None = None,
-        external_squad_uuid: str | None = None,
-        telegram_id: int | None = None,
-        description: str | None = None,
-    ) -> RemnawaveUser:
-        payload: dict[str, Any] = {"uuid": remnawave_uuid}
+    async def update_user(self, remnawave_user_id: int, traffic_limit_bytes: int | None = None,
+                          expire_at: str | None = None, internal_squad_uuids: list[str] | None = None,
+                          external_squad_uuid: str | None = None, telegram_id: int | None = None,
+                          description: str | None = None) -> RemnawaveUser:
+        payload: dict[str, Any] = {"id": remnawave_user_id}
         if traffic_limit_bytes is not None:
             payload["trafficLimitBytes"] = traffic_limit_bytes
         if expire_at is not None:
@@ -129,19 +138,11 @@ class RemnawaveClient:
         if description is not None:
             payload["description"] = description
         async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
-            resp = await http.patch(
-                f"{self._base}/users",
-                headers=self._headers,
-                json=payload,
-            )
-            logger.error("Remnawave update_user status=%s body=%s", resp.status_code, resp.text)
-            resp.raise_for_status()
-            return _parse_user(resp.json())
+            response = await http.patch(f"{self._base}/users", headers=self._headers, json=payload)
+            response.raise_for_status()
+            return _parse_user(response.json())
 
-    async def delete_user(self, remnawave_uuid: str) -> None:
+    async def delete_user(self, remnawave_user_id: int) -> None:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
-            resp = await http.delete(
-                f"{self._base}/users/{remnawave_uuid}",
-                headers=self._headers,
-            )
-            resp.raise_for_status()
+            response = await http.delete(f"{self._base}/users/{remnawave_user_id}", headers=self._headers)
+            response.raise_for_status()

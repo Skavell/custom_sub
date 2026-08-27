@@ -146,7 +146,7 @@ export interface UserAdminListItem {
   subscription_status: string | null
   subscription_type: string | null
   subscription_expires_at: string | null
-  remnawave_uuid: string | null
+  remnawave_user_id: number | null
   subscription_conflict: boolean
   has_made_payment: boolean
   created_at: string
@@ -190,7 +190,7 @@ export interface UserAdminDetail {
   email_verified: boolean | null
   has_made_payment: boolean
   subscription_conflict: boolean
-  remnawave_uuid: string | null
+  remnawave_user_id: number | null
   created_at: string
   last_seen_at: string
   providers: AdminProviderInfo[]
@@ -199,11 +199,11 @@ export interface UserAdminDetail {
 }
 
 export interface ConflictResolveRequest {
-  remnawave_uuid: string
+  remnawave_user_id: number
 }
 
-export interface SetRemnawaveUuidRequest {
-  remnawave_uuid: string
+export interface SetRemnawaveUserIdRequest {
+  remnawave_user_id: number
 }
 
 export interface SyncAllResponse {

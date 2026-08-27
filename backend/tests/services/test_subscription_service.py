@@ -80,7 +80,8 @@ async def test_sync_subscription_from_remnawave_active():
 
     user = _make_user(REMNAWAVE_UUID)
     remnawave_user = RemnawaveUser(
-        id=REMNAWAVE_UUID,
+        id=12345,
+        short_uuid="abc123",
         username="ws_4a1b2c3d",
         expire_at=NOW + timedelta(days=7),
         traffic_limit_bytes=0,

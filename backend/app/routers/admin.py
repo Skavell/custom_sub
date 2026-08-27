@@ -32,7 +32,10 @@ from app.schemas.admin import (
     ArticleCreateRequest,
     ArticleUpdateRequest,
     ConflictResolveRequest,
-    SetRemnawaveUuidRequest,
+    SetRemnawaveUserIdRequest,
+    RemnawaveV3ReconcileRequest,
+    RemnawaveV3ReconcileResponse,
+    RemnawaveV3ReconcileItem,
     PlanAdminItem,
     PlanCreateRequest,
     PlanUpdateRequest,
@@ -58,6 +61,77 @@ from app.services.subscription_service import sync_subscription_from_remnawave
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
+@router.post("/remnawave-v3/reconcile", response_model=RemnawaveV3ReconcileResponse)
+async def reconcile_remnawave_v3_users(
+    data: RemnawaveV3ReconcileRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> RemnawaveV3ReconcileResponse:
+    """Safely map v2 UUID-linked users to v3 numeric ids.
+
+    The default is a dry run.  A match must be unambiguous across deterministic
+    site username and an optionally linked Telegram account before it is saved.
+    """
+    url = await get_setting(db, "remnawave_url")
+    token = await get_setting_decrypted(db, "remnawave_token")
+    if not url or not token:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Remnawave не настроен")
+
+    candidates_result = await db.execute(
+        select(User)
+        .where(User.remnawave_user_id.is_(None), User.remnawave_uuid.is_not(None))
+        .options(selectinload(User.auth_providers))
+        .limit(min(max(data.limit, 1), 1000))
+    )
+    candidates = candidates_result.scalars().unique().all()
+    client = RemnawaveClient(url, token)
+    items: list[RemnawaveV3ReconcileItem] = []
+    counts = {"matched": 0, "applied": 0, "ambiguous": 0, "missing": 0, "conflicts": 0, "errors": 0}
+
+    for user in candidates:
+        found: dict[int, list[str]] = {}
+        try:
+            user_id_hex = str(user.id).replace("-", "")
+            for username in (f"ws_{user_id_hex[:8]}", f"ws_{user_id_hex[:12]}"):
+                remote = await client.get_user_by_username(username)
+                if remote:
+                    found.setdefault(remote.id, []).append("username")
+            tg_provider = next((p for p in user.auth_providers if p.provider == ProviderType.telegram), None)
+            if tg_provider:
+                remote = await client.get_user_by_telegram_id(int(tg_provider.provider_user_id))
+                if remote:
+                    found.setdefault(remote.id, []).append("telegram")
+        except Exception:
+            counts["errors"] += 1
+            items.append(RemnawaveV3ReconcileItem(user_id=user.id, status="error"))
+            continue
+
+        if not found:
+            counts["missing"] += 1
+            items.append(RemnawaveV3ReconcileItem(user_id=user.id, status="missing"))
+            continue
+        if len(found) != 1:
+            counts["ambiguous"] += 1
+            items.append(RemnawaveV3ReconcileItem(user_id=user.id, status="ambiguous"))
+            continue
+
+        remote_id, methods = next(iter(found.items()))
+        existing = await db.execute(select(User.id).where(User.remnawave_user_id == remote_id, User.id != user.id))
+        if existing.scalar_one_or_none() is not None:
+            counts["conflicts"] += 1
+            items.append(RemnawaveV3ReconcileItem(user_id=user.id, status="conflict", remnawave_user_id=remote_id, methods=methods))
+            continue
+        counts["matched"] += 1
+        if data.apply:
+            user.remnawave_user_id = remote_id
+            counts["applied"] += 1
+        items.append(RemnawaveV3ReconcileItem(user_id=user.id, status="matched", remnawave_user_id=remote_id, methods=methods))
+
+    if data.apply:
+        await db.commit()
+    return RemnawaveV3ReconcileResponse(dry_run=not data.apply, processed=len(candidates), items=items, **counts)
+
+
 def _build_list_item(u: User) -> UserAdminListItem:
     sub = u.subscription
     email_provider = next((p for p in u.auth_providers if p.provider.value == "email"), None)
@@ -67,7 +141,7 @@ def _build_list_item(u: User) -> UserAdminListItem:
         avatar_url=u.avatar_url,
         is_admin=u.is_admin,
         is_banned=u.is_banned,
-        remnawave_uuid=u.remnawave_uuid,
+        remnawave_user_id=u.remnawave_user_id,
         has_made_payment=u.has_made_payment,
         subscription_conflict=u.subscription_conflict,
         created_at=u.created_at,
@@ -111,7 +185,7 @@ async def list_users(
             or_(
                 User.display_name.ilike(f"%{q}%"),
                 cast(User.id, String).ilike(f"{q_norm}%"),
-                cast(User.remnawave_uuid, String).ilike(f"%{q_norm}%"),
+                cast(User.remnawave_user_id, String).ilike(f"%{q_norm}%"),
                 email_exists,
             )
         )
@@ -148,7 +222,7 @@ async def _build_user_detail(user_id: uuid.UUID, db: AsyncSession) -> UserAdminD
         avatar_url=user.avatar_url,
         is_admin=user.is_admin,
         is_banned=user.is_banned,
-        remnawave_uuid=user.remnawave_uuid,
+        remnawave_user_id=user.remnawave_user_id,
         has_made_payment=user.has_made_payment,
         subscription_conflict=user.subscription_conflict,
         created_at=user.created_at,
@@ -230,6 +304,7 @@ async def reset_subscription(
     if sub is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Подписка не найдена")
     await db.delete(sub)
+    user.remnawave_user_id = None
     user.remnawave_uuid = None
     await db.commit()
     return {"ok": True}
@@ -247,8 +322,8 @@ async def sync_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
-    if user.remnawave_uuid is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="У пользователя нет Remnawave UUID")
+    if user.remnawave_user_id is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="У пользователя нет Remnawave ID")
 
     url = await get_setting(db, "remnawave_url")
     token = await get_setting_decrypted(db, "remnawave_token")
@@ -257,7 +332,7 @@ async def sync_user(
 
     rw_client = RemnawaveClient(url, token)
     try:
-        rw_user = await rw_client.get_user(str(user.remnawave_uuid))
+        rw_user = await rw_client.get_user(user.remnawave_user_id)
     except Exception:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Ошибка связи с Remnawave")
 
@@ -273,70 +348,77 @@ async def resolve_conflict(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     try:
-        new_rw_uuid = uuid.UUID(data.remnawave_uuid)
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный UUID")
+        new_rw_id = int(data.remnawave_user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный Remnawave ID")
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
 
-    user.remnawave_uuid = new_rw_uuid
-    user.subscription_conflict = False
-    await db.commit()
-
     url = await get_setting(db, "remnawave_url")
     token = await get_setting_decrypted(db, "remnawave_token")
-    if url and token:
-        try:
-            rw_user = await RemnawaveClient(url, token).get_user(str(new_rw_uuid))
-            await sync_subscription_from_remnawave(db, user, rw_user)
-        except Exception:
-            pass  # Conflict cleared; sync failure is non-critical
+    if not url or not token:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Remnawave не настроен")
+    try:
+        rw_user = await RemnawaveClient(url, token).get_user(new_rw_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Remnawave пользователь с таким ID не найден")
+    conflict_result = await db.execute(
+        select(User.id).where(User.remnawave_user_id == new_rw_id, User.id != user_id)
+    )
+    if conflict_result.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Этот Remnawave ID уже привязан к другому пользователю")
+
+    user.remnawave_user_id = new_rw_id
+    user.subscription_conflict = False
+    await db.commit()
+    await sync_subscription_from_remnawave(db, user, rw_user)
 
     return {"ok": True}
 
 
-@router.patch("/users/{user_id}/remnawave-uuid")
-async def set_remnawave_uuid(
+@router.patch("/users/{user_id}/remnawave-user-id")
+async def set_remnawave_user_id(
     user_id: uuid.UUID,
-    data: SetRemnawaveUuidRequest,
+    data: SetRemnawaveUserIdRequest,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     try:
-        new_rw_uuid = uuid.UUID(data.remnawave_uuid)
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный UUID")
-
-    # Check no other user already holds this remnawave_uuid
-    conflict_result = await db.execute(
-        select(User).where(User.remnawave_uuid == new_rw_uuid, User.id != user_id)
-    )
-    if conflict_result.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Этот Remnawave UUID уже привязан к другому пользователю",
-        )
+        new_rw_id = int(data.remnawave_user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный Remnawave ID")
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
 
-    user.remnawave_uuid = new_rw_uuid
-    user.subscription_conflict = False
-    await db.commit()
-
     url = await get_setting(db, "remnawave_url")
     token = await get_setting_decrypted(db, "remnawave_token")
-    if url and token:
-        try:
-            rw_user = await RemnawaveClient(url, token).get_user(str(new_rw_uuid))
-            await sync_subscription_from_remnawave(db, user, rw_user)
-        except Exception:
-            pass  # UUID saved; sync failure is non-critical
+    if not url or not token:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Remnawave не настроен")
+    try:
+        rw_user = await RemnawaveClient(url, token).get_user(new_rw_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Remnawave пользователь с таким ID не найден")
+
+    # Check no other user already holds this Remnawave id.
+    conflict_result = await db.execute(
+        select(User).where(User.remnawave_user_id == new_rw_id, User.id != user_id)
+    )
+    if conflict_result.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Этот Remnawave ID уже привязан к другому пользователю",
+        )
+
+    user.remnawave_user_id = new_rw_id
+    user.subscription_conflict = False
+    await db.commit()
+    await sync_subscription_from_remnawave(db, user, rw_user)
 
     return {"ok": True}
 

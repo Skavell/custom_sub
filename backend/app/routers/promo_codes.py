@@ -41,7 +41,7 @@ async def apply_promo(
     db: AsyncSession = Depends(get_db),
 ) -> ApplyPromoResponse:
     # Guard: trial must be activated
-    if current_user.remnawave_uuid is None:
+    if current_user.remnawave_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Сначала активируйте пробный период",
