@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { Check, X } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { isTelegramBrowser } from '@/lib/utils'
 import type { OAuthConfigResponse } from '@/types/api'
@@ -35,6 +36,13 @@ function loginWithVK(clientId: string) {
 function isStrongPassword(p: string) {
   return p.length >= 8 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /[0-9]/.test(p)
 }
+
+const passwordRequirements = [
+  { label: 'Минимум 8 символов', test: (password: string) => password.length >= 8 },
+  { label: 'Заглавная буква', test: (password: string) => /[A-Z]/.test(password) },
+  { label: 'Строчная буква', test: (password: string) => /[a-z]/.test(password) },
+  { label: 'Цифра', test: (password: string) => /[0-9]/.test(password) },
+]
 
 type Mode = 'login' | 'register' | 'forgot' | 'reset-sent'
 
@@ -71,6 +79,12 @@ export default function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+
+    if (mode === 'register' && !isStrongPassword(password)) {
+      setError('Пароль пока не соответствует всем требованиям')
+      return
+    }
+
     setLoading(true)
     try {
       if (mode === 'login') {
@@ -228,11 +242,29 @@ export default function LoginPage() {
               onChange={e => setPassword(e.target.value)}
               required
               minLength={8}
-              className="w-full bg-background border border-border-neutral rounded-input px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+              aria-describedby={mode === 'register' ? 'password-requirements' : undefined}
+              className={`w-full bg-background border rounded-input px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent ${
+                mode === 'register' && password
+                  ? isStrongPassword(password) ? 'border-green-500' : 'border-red-400'
+                  : 'border-border-neutral'
+              }`}
               placeholder="Минимум 8 символов"
             />
-            {mode === 'register' && password && !isStrongPassword(password) && (
-              <p className="mt-1 text-xs text-text-muted">Мин. 8 символов, заглавная буква, строчная буква, цифра</p>
+            {mode === 'register' && (
+              <ul id="password-requirements" className="mt-2 space-y-1" aria-label="Требования к паролю">
+                {passwordRequirements.map(({ label, test }) => {
+                  const isMet = test(password)
+                  return (
+                    <li
+                      key={label}
+                      className={`flex items-center gap-1.5 text-xs ${isMet ? 'text-green-400' : 'text-red-400'}`}
+                    >
+                      {isMet ? <Check size={14} aria-hidden="true" /> : <X size={14} aria-hidden="true" />}
+                      {label}
+                    </li>
+                  )
+                })}
+              </ul>
             )}
           </div>
           {mode === 'login' && (
@@ -249,8 +281,8 @@ export default function LoginPage() {
           {error && <p className="text-sm text-red-400">{error}</p>}
           <button
             type="submit"
-            disabled={loading}
-            className="w-full py-2 rounded-input bg-accent text-background font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+            disabled={loading || (mode === 'register' && !isStrongPassword(password))}
+            className="w-full py-2 rounded-input bg-accent text-background font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Загрузка...' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
           </button>
